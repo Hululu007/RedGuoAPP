@@ -17,7 +17,6 @@ def run(arguments, env, cwd=root):
 
 
 def developer_directory():
-    """返回完整 Xcode 的 Contents/Developer 目录。"""
     configured = os.environ.get('DEVELOPER_DIR')
     if configured and Path(configured).is_dir():
         return Path(configured)
@@ -38,9 +37,6 @@ def toolchain_environment(developer):
     env['DEVELOPER_DIR'] = str(developer)
     env.setdefault('GOPROXY', 'https://goproxy.cn,direct')
     env.setdefault('GOSUMDB', 'off')
-    # Dart 的 native assets 钩子直接调用 PATH 里的 `xcrun --show-sdk-path`；
-    # xcode-select 指向 Command Line Tools 时它会拿到 CLT 的 SDK，常与 Xcode 版本不匹配
-    # （tapi 报 unknown architecture）。这里用一层 xcrun 垫片固定到 Xcode 的 SDK。
     shim = root / 'build' / 'macos-toolchain' / 'bin'
     shim.mkdir(parents=True, exist_ok=True)
     script = shim / 'xcrun'
@@ -51,7 +47,6 @@ def toolchain_environment(developer):
 
 
 def package_path(name):
-    """从 package_config.json 找出依赖在 pub 缓存里的真实路径。"""
     import json
     config = root / '.dart_tool' / 'package_config.json'
     if not config.is_file():
@@ -64,7 +59,6 @@ def package_path(name):
 
 
 def repair_media_kit(env):
-    """media_kit_libs_macos_video 用 `sed -i ''` 去 CRLF，BSD sed 不支持 \\r，导致 mpv 符号链接为空。"""
     package = package_path('media_kit_libs_macos_video')
     if package is None:
         return
@@ -86,8 +80,6 @@ def main():
     variant = BuildVariant(options.all_sources)
     if platform.system() != 'Darwin':
         raise SystemExit('macOS 构建需要 macOS 与完整 Xcode。')
-    if platform.machine() != 'arm64':
-        print('注意：产物只面向 Apple Silicon（arm64），在 Intel Mac 上无法运行。', flush=True)
     env = toolchain_environment(developer_directory())
     flutter = shutil.which('flutter')
     pod = shutil.which('pod')

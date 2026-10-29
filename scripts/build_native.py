@@ -70,24 +70,21 @@ elif options.platform == 'windows':
     build('windows', 'amd64', compiler, root / 'windows' / 'runner' / 'duanju_core.dll',
           {'CGO_LDFLAGS': '-static-libgcc'})
 else:
-    # macOS：只出 Apple Silicon，并且用静态库（c-archive）链进 Runner，
-    # 避免 dylib 的签名、rpath 与库校验问题；Dart 侧用 DynamicLibrary.process() 查符号。
     if platform.system() != 'Darwin':
         raise SystemExit('macOS 核心需要在 macOS 上构建。')
     compiler = shutil.which('clang')
     if not compiler:
         raise SystemExit('需要安装 Xcode Command Line Tools。')
-    minimum = {'CGO_CFLAGS': '-mmacosx-version-min=12.0',
-               'CGO_LDFLAGS': '-mmacosx-version-min=12.0'}
     output = root / 'macos' / 'DuanjuCore' / 'libDuanjuCore.a'
-    output.parent.mkdir(parents=True, exist_ok=True)
-    environment['CGO_ENABLED'] = '1'
-    print('Building ' + str(output.relative_to(root)), flush=True)
-    build_env = environment | {'GOOS': 'darwin', 'GOARCH': 'arm64', 'CC': str(compiler)} | minimum
-    subprocess.run([go, 'build', '-trimpath', '-buildmode=c-archive',
-                    '-ldflags=' + variant.linker_flags, '-o', str(output), './bridge'],
-                   cwd=root / 'native', env=build_env, check=True)
-    # Go 会同时生成同名头文件，只保留静态库，头文件不参与 pod 编译。
-    header = output.with_suffix('.h')
-    if header.exists():
-        header.unlink()
+    slices = []
+    for architecture, triple in [('arm64', 'arm64-apple-macos12.0'), ('amd64', 'x86_64-apple-macos12.0')]:
+        library = root / 'native' / 'build' / 'macos' / architecture / 'libDuanjuCore.a'
+        library.parent.mkdir(parents=True, exist_ok=True)
+        print('Building ' + str(library.relative_to(root)), flush=True)
+        build_env = environment | {'GOOS': 'darwin', 'GOARCH': architecture, 'CC': str(compiler),
+                                   'CGO_CFLAGS': '-target ' + triple, 'CGO_LDFLAGS': '-target ' + triple}
+        subprocess.run([go, 'build', '-trimpath', '-buildmode=c-archive',
+                        '-ldflags=' + variant.linker_flags, '-o', str(library), './bridge'],
+                       cwd=root / 'native', env=build_env, check=True)
+        slices.append(str(library))
+    subprocess.run(['lipo', '-create', *slices, '-output', str(output)], check=True)

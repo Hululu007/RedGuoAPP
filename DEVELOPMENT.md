@@ -7,7 +7,7 @@ Flutter `3.47.4`、Dart `3.12+`、Go `1.24.1+`、Python `3.10+`。
 - Android：JDK 17、SDK 36、NDK `28.2.13676358`
 - Windows：Visual Studio C++ 桌面组件、MinGW-w64 x64
 - iOS：macOS、完整 Xcode、CocoaPods
-- macOS：Apple Silicon（arm64）、完整 Xcode、CocoaPods；`xcode-select` 指向 Command Line Tools 时 `build_macos.py` 会自动改用 `/Applications/Xcode*.app`，也可以在系统层面执行 `sudo xcode-select -s`
+- macOS：完整 Xcode、CocoaPods，打 dmg 需 `pip install dmgbuild Pillow`；`xcode-select` 指向 Command Line Tools 时 `build_macos.py` 会自动改用 `/Applications/Xcode*.app`，也可以在系统层面执行 `sudo xcode-select -s`
 
 构建脚本对子进程默认设置 `GOPROXY=https://goproxy.cn,direct`、`GOSUMDB=off`，同名环境变量可覆盖。
 
@@ -21,7 +21,7 @@ flutter pub get --enforce-lockfile
 flutter run
 ~~~
 
-调试真果鉴（全站源版）：`build_native.py` 加 `--all-sources`，再 `flutter run --dart-define=ALL_SOURCES=true`；iOS 对应 `build_ios.py --core-only --all-sources`。版本是编译期开关，Dart 常量和 Go 编译参数必须一致，应用启动时会校验，避免混装原生库。
+调试真果鉴（全站源版）：`build_native.py` 加 `--all-sources`，再 `flutter run --dart-define=ALL_SOURCES=true`；iOS 对应 `build_ios.py --core-only --all-sources`，macOS 用 `build_native.py --platform darwin --all-sources`。版本是编译期开关，Dart 常量和 Go 编译参数必须一致，应用启动时会校验，避免混装原生库。
 
 ## 出包
 
@@ -36,7 +36,7 @@ python3 scripts/build_ios.py --core-only [--simulator]
 python3 scripts/build_ios.py --export-options /path/to/ExportOptions.plist
 ~~~
 
-产物在 `dist/android`、`dist/windows`、`dist/ios`、`dist/macos`，红果鉴以 `hongguojian-` 开头，真果鉴以 `zhenguojian-` 开头。macOS 只出 arm64 的 dmg（Intel Mac 不支持）；dmg 的安装窗口（背景图、图标位置、隐藏工具栏）由 `dmgbuild` 写入 `.DS_Store`，打包机需要 `pip install dmgbuild Pillow`，没装时会退回普通镜像并提示。默认 ad-hoc 签名，从网络下载的 dmg 在其他 Mac 上首次打开会被 Gatekeeper 拦一次（右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/红果鉴.app`）。有 Developer ID 时用 `package_release.py --platform macos --identity "Developer ID Application: ..."` 重新打包并公证，才能免掉这一步。本机 Android 签名使用 `android/key.properties`（不入库）。
+产物在 `dist/android`、`dist/windows`、`dist/ios`、`dist/macos`，红果鉴以 `hongguojian-` 开头，真果鉴以 `zhenguojian-` 开头。macOS 出 arm64 + x86_64 通用 dmg；dmg 的安装窗口（背景图、图标位置、隐藏工具栏）由 `dmgbuild` 写入 `.DS_Store`，打包机需要 `pip install dmgbuild Pillow`，没装时会退回普通镜像并提示。默认 ad-hoc 签名，从网络下载的 dmg 在其他 Mac 上首次打开会被 Gatekeeper 拦一次（右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/红果鉴.app`）。有 Developer ID 时用 `package_release.py --platform macos --identity "Developer ID Application: ..."` 重新打包并公证，才能免掉这一步。本机 Android 签名使用 `android/key.properties`（不入库）。
 
 其他脚本：`generate_brand_assets.py` 从 `brand_icon.svg` 生成各平台图标；`clear_app_data.py`、`clear_catalog_cache.py` 清理 Windows 上的应用数据和剧库缓存。
 
@@ -90,17 +90,16 @@ Go RE2 正则**不支持 lookahead**。解析多线路播放列表时不能用 `
 2. 在 `CHANGELOG.md` 新增同名一节（标题如 `## 1.0.1+101`），工作流会把它写入 Release 说明；未验证的改动标为开发快照。
 3. 推送到 `main`，在 Actions 中手动运行 **Build app packages**。
 
-工作流先检查版本：tag `app-v{version}`（`+` 替换为 `-`）或同名 Release 已存在时直接失败。随后三个平台各构建红果鉴、真果鉴两版：
+工作流先检查版本：tag `app-v{version}`（`+` 替换为 `-`）或同名 Release 已存在时直接失败。随后四个平台各构建红果鉴、真果鉴两版：
 
 | 产物 | 内容 |
 | --- | --- |
 | `*-android` | 三种架构 APK，使用发布证书签名并通过指纹校验 |
 | `*-windows` | Windows x64 ZIP |
 | `*-ios-unsigned` | arm64 iPhone 未签名 IPA |
+| `*-macos` | arm64 + x86_64 通用 dmg，ad-hoc 签名、未公证 |
 
-macOS 目前不在 CI 里：用 `python3 scripts/build_macos.py [--all-sources]` 在 Apple Silicon Mac 上本地出 dmg（CI 若接入，需要 macOS runner 并安装 CocoaPods）。
-
-格式、分析、测试不阻塞出包；Android、Windows、iOS 全部成功后才创建 tag 和 Release，任一平台失败就不发布，已有 Release 不会被覆盖。
+格式、分析、测试不阻塞出包；Android、Windows、iOS、macOS 全部成功后才创建 tag 和 Release，任一平台失败就不发布，已有 Release 不会被覆盖。
 
 Android 签名只用仓库 Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，另需仓库变量 `ANDROID_CERT_SHA256`（证书 SHA-256，冒号和大小写不限），缺任意一项都会失败。CI 通过环境变量把签名传给 Gradle。
 
@@ -117,4 +116,4 @@ npx wrangler d1 execute guoapp-stats --remote --command "SELECT COUNT(DISTINCT i
 npx wrangler d1 execute guoapp-stats --remote --command "SELECT platform, build, version, COUNT(*) FROM pings WHERE day = date('now', '+8 hours') GROUP BY 1, 2, 3 ORDER BY 4 DESC"  # 今日分布
 ~~~
 
-应用显示名：Android 在 `android/app/build.gradle.kts`，Windows 在 `windows/runner/app_branding.cmake`，iOS 由 Xcode「Thin Binary」构建阶段按 `DART_DEFINES` 写入，macOS 由 `scripts/package_release.py` 打包时改 `CFBundleDisplayName` / `CFBundleName` / `CFBundleIdentifier` 后重新签名。iOS 的 `CFBundleDisplayName` 用英文 `HongGuoJian` / `ZhenGuoJian` 以通过侧载工具的名称校验，中文名写在 `zh-Hans.lproj/InfoPlist.strings`。
+应用显示名：Android 在 `android/app/build.gradle.kts`，Windows 在 `windows/runner/app_branding.cmake`，iOS 由 Xcode「Thin Binary」构建阶段按 `DART_DEFINES` 写入，macOS 由 `scripts/package_release.py` 打包时改 `CFBundleDisplayName` / `CFBundleName` / `CFBundleIdentifier` 后重新签名。iOS 的 `CFBundleDisplayName` 用英文 `HongGuoJian` / `ZhenGuoJian` 以通过侧载工具的名称校验，中文名写在 `zh-Hans.lproj/InfoPlist.strings`。macOS 关闭了 App Sandbox，以便本地播放代理和自选下载目录正常工作；系统代理由 `MainFlutterWindow.swift` 的 `duanju/device` 通道读取。

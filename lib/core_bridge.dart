@@ -35,7 +35,6 @@ String _nativeRequest(String body) {
       path.join(path.dirname(Platform.resolvedExecutable), 'duanju_core.dll'),
     );
   } else if (Platform.isIOS || Platform.isMacOS) {
-    // iOS / macOS 把 Go 核心以静态库链进主程序，符号在主可执行文件里。
     library = DynamicLibrary.process();
   } else {
     throw UnsupportedError('当前支持 Android、iOS、Windows 和 macOS');

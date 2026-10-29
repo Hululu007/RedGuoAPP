@@ -45,8 +45,8 @@ def verify_macos_application(application):
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise SystemExit('macOS 包缺少可执行文件。')
     architectures = macho_architectures(executable)
-    if 'arm64' not in architectures or 'x86_64' in architectures:
-        raise SystemExit('macOS 包只应包含 arm64：' + architectures)
+    if 'arm64' not in architectures or 'x86_64' not in architectures:
+        raise SystemExit('macOS 包应同时包含 arm64 和 x86_64：' + architectures)
     symbols = subprocess.run(['nm', '-gU', str(executable)], capture_output=True, text=True).stdout
     for symbol in ['_DuanjuRequest', '_DuanjuFree']:
         if symbol not in symbols:
@@ -55,11 +55,6 @@ def verify_macos_application(application):
     for required in ['App.framework', 'FlutterMacOS.framework', 'Mpv.framework', 'ffmpegkit.framework']:
         if not (frameworks / required).is_dir():
             raise SystemExit('macOS 包缺少框架：' + required)
-    for binary in frameworks.glob('*.framework/Versions/A/*'):
-        if binary.is_file() and os.access(binary, os.X_OK):
-            architectures = macho_architectures(binary)
-            if 'x86_64' in architectures:
-                raise SystemExit(f'{binary.parent.parent.parent.name} 含 Intel 切片：{architectures}')
 
 
 def sign_macos_application(application, identity):
@@ -72,7 +67,6 @@ def sign_macos_application(application, identity):
 
 
 def draw_dmg_background(path, display):
-    """生成 dmg 窗口背景：品牌底色 + 从左到右的箭头 + 安装提示。没有 Pillow 时跳过。"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -102,7 +96,6 @@ def draw_dmg_background(path, display):
 
 
 def build_macos_dmg(display, staging, staged, target):
-    """优先用 dmgbuild 生成带 .DS_Store 的安装窗口；没装 dmgbuild 时退回普通镜像。"""
     background = draw_dmg_background(staging.parent / 'dmg-background.png', display)
     installed = subprocess.run([sys.executable, '-c', 'import dmgbuild'],
                                capture_output=True).returncode == 0
@@ -153,7 +146,7 @@ def package_macos(application):
     plist_path.write_bytes(plistlib.dumps(info))
     sign_macos_application(staged, options.identity)
     verify_macos_application(staged)
-    target = output / f'{variant.slug}-{version}-macos-arm64.dmg'
+    target = output / f'{variant.slug}-{version}-macos-universal.dmg'
     if target.exists():
         target.unlink()
     build_macos_dmg(display, staging, staged, target)

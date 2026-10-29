@@ -44,7 +44,6 @@ for entry in contents['images']:
         save(icon.resize((size, size), Image.Resampling.LANCZOS),
              'ios/Runner/Assets.xcassets/AppIcon.appiconset/' + entry['filename'])
 save(rounded.resize((256, 256), Image.Resampling.LANCZOS), 'windows/runner/resources/app_icon.ico')
-# macOS：Big Sur 之后的图标是 1024 画布上留白 ~10% 的圆角方，这里按 824 居中叠放。
 macos_canvas = Image.new('RGBA', (1024, 1024))
 macos_badge = rounded.resize((824, 824), Image.Resampling.LANCZOS)
 macos_canvas.paste(macos_badge, (100, 100), macos_badge)
@@ -65,7 +64,6 @@ for density, scale in [('mdpi', 1), ('hdpi', 1.5), ('xhdpi', 2), ('xxhdpi', 3), 
          f'android/app/src/main/res/mipmap-{density}/ic_launcher_monochrome.png')
 font_path = options.font
 if not font_path.exists():
-    # 新版 macOS 不再自带 PingFang.ttc，退化到系统里仍有的中文字体。
     for candidate in ('/System/Library/Fonts/Hiragino Sans GB.ttc',
                       '/System/Library/Fonts/STHeiti Medium.ttc'):
         if Path(candidate).exists():
