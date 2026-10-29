@@ -6,6 +6,9 @@
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 
+#include <shobjidl.h>
+#include <wrl/client.h>
+
 #include <memory>
 
 #include "win32_window.h"
@@ -25,12 +28,17 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  void SetFullScreen(bool enabled);
+
   // The project to run.
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> device_channel_;
+  Microsoft::WRL::ComPtr<ITaskbarList2> taskbar_;
+  bool fullscreen_ = false;
+  RECT frame_before_fullscreen_{};
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

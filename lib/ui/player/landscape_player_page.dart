@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../app_device.dart';
 import '../../local_store.dart';
@@ -23,6 +22,7 @@ import 'playback_handle.dart';
 import 'playback_sheets.dart';
 import 'player_surface.dart';
 import 'swipe_controls.dart';
+import 'window_fullscreen.dart';
 
 enum _Panel { episodes, settings, speed, quality }
 
@@ -117,7 +117,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     if (_holding) _session.endBoost();
     if (widget.onFullscreen == null) {
       if (_full == true && desktopPlatform) {
-        unawaited(windowManager.setFullScreen(false).catchError((Object _) {}));
+        unawaited(setWindowFullScreen(false));
       }
       unawaited(AppDevice.releaseOrientation());
       unawaited(
@@ -296,7 +296,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
 
   void _rotate(bool full) => unawaited(
     desktopPlatform
-        ? windowManager.setFullScreen(!full).catchError((Object _) {})
+        ? setWindowFullScreen(!full)
         : AppDevice.setPlayerOrientation(
             full ? PlayerOrientation.portrait : PlayerOrientation.landscape,
           ),

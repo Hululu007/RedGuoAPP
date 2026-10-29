@@ -31,8 +31,23 @@ bool FlutterWindow::OnCreate() {
           flutter_controller_->engine()->messenger(), "duanju/device",
           &flutter::StandardMethodCodec::GetInstance());
   device_channel_->SetMethodCallHandler(
-      [](const flutter::MethodCall<flutter::EncodableValue>& call,
-         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "setFullScreen") {
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          const bool* enabled = nullptr;
+          if (args) {
+            const auto found = args->find(flutter::EncodableValue("enabled"));
+            if (found != args->end()) enabled = std::get_if<bool>(&found->second);
+          }
+          if (!enabled) {
+            result->Error("bad_args", "enabled is required");
+            return;
+          }
+          SetFullScreen(*enabled);
+          result->Success();
+          return;
+        }
         if (call.method_name() != "playbackPower") {
           result->NotImplemented();
           return;
@@ -51,6 +66,11 @@ bool FlutterWindow::OnCreate() {
             flutter::EncodableValue(!memory_known || memory.ullTotalPhys < 4ULL * 1024 * 1024 * 1024);
         result->Success(flutter::EncodableValue(values));
       });
+  if (FAILED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&taskbar_))) ||
+      FAILED(taskbar_->HrInit())) {
+    taskbar_.Reset();
+  }
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -65,8 +85,34 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::SetFullScreen(bool enabled) {
+  if (enabled == fullscreen_) {
+    return;
+  }
+  HWND window = GetHandle();
+  RECT target = frame_before_fullscreen_;
+  if (enabled) {
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                        &monitor)) {
+      return;
+    }
+    GetWindowRect(window, &frame_before_fullscreen_);
+    target = monitor.rcMonitor;
+  }
+  fullscreen_ = enabled;
+  SetWindowPos(window, nullptr, target.left, target.top,
+               target.right - target.left, target.bottom - target.top,
+               SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  if (taskbar_) {
+    taskbar_->MarkFullscreenWindow(window, enabled);
+  }
+}
+
 void FlutterWindow::OnDestroy() {
   device_channel_.reset();
+  taskbar_.Reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -89,6 +135,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_NCCALCSIZE:
+      if (fullscreen_ && wparam) {
+        return 0;
+      }
+      break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

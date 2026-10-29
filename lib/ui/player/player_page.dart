@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../local_store.dart';
 import '../../models.dart';
@@ -15,6 +14,7 @@ import '../widgets/follow_button.dart';
 import 'episode_grid.dart';
 import 'playback_handle.dart';
 import 'player_surface.dart';
+import 'window_fullscreen.dart';
 
 const _panelWidth = 360.0;
 
@@ -80,8 +80,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   bool get _roomy => MediaQuery.sizeOf(context).width - 32 >= 840;
 
-  Future<void> _setFullScreen(bool value) =>
-      windowManager.setFullScreen(value).catchError((Object _) {});
+  Future<void> _setFullScreen(bool value) => setWindowFullScreen(value);
 
   Future<void> _toggleFullscreen() async {
     if (widget.padFullscreen case final pad?) {

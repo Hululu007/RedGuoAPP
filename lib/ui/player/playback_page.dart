@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../app_device.dart';
 import '../../local_store.dart';
@@ -13,6 +12,7 @@ import 'playback_handle.dart';
 import 'player_page.dart';
 import 'portrait_player_page.dart';
 import 'television_player_page.dart';
+import 'window_fullscreen.dart';
 
 class PlaybackPage extends StatefulWidget {
   const PlaybackPage({super.key, required this.store, required this.handle});
@@ -60,7 +60,7 @@ class _PlaybackPageState extends State<PlaybackPage> {
 
   void _applyPadFullscreen(bool full) {
     if (desktopPlatform) {
-      unawaited(windowManager.setFullScreen(full).catchError((Object _) {}));
+      unawaited(setWindowFullScreen(full));
       return;
     }
     unawaited(
