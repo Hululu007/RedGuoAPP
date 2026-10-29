@@ -16,6 +16,7 @@ class PlaybackPreferences {
     this.preopen,
     this.doubleTapSeek = true,
     this.swipeLevels = true,
+    this.autoPictureInPicture = false,
   });
 
   final double speed;
@@ -28,6 +29,7 @@ class PlaybackPreferences {
   final bool? preopen;
   final bool doubleTapSeek;
   final bool swipeLevels;
+  final bool autoPictureInPicture;
 
   bool preopens({required bool television}) => preopen ?? !television;
 
@@ -42,6 +44,7 @@ class PlaybackPreferences {
     bool? preopen,
     bool? doubleTapSeek,
     bool? swipeLevels,
+    bool? autoPictureInPicture,
   }) => PlaybackPreferences(
     speed: speed ?? this.speed,
     quality: quality ?? this.quality,
@@ -53,6 +56,7 @@ class PlaybackPreferences {
     preopen: preopen ?? this.preopen,
     doubleTapSeek: doubleTapSeek ?? this.doubleTapSeek,
     swipeLevels: swipeLevels ?? this.swipeLevels,
+    autoPictureInPicture: autoPictureInPicture ?? this.autoPictureInPicture,
   );
 
   Map<String, dynamic> toJson() => {
@@ -66,6 +70,7 @@ class PlaybackPreferences {
     if (preopen != null) 'preopen': preopen,
     'doubleTapSeek': doubleTapSeek,
     'swipeLevels': swipeLevels,
+    'autoPictureInPicture': autoPictureInPicture,
   };
 
   factory PlaybackPreferences.fromJson(Map<String, dynamic> value) {
@@ -90,6 +95,7 @@ class PlaybackPreferences {
       preopen: value['preopen'] as bool?,
       doubleTapSeek: value['doubleTapSeek'] as bool? ?? true,
       swipeLevels: value['swipeLevels'] as bool? ?? true,
+      autoPictureInPicture: value['autoPictureInPicture'] as bool? ?? false,
     );
   }
 }

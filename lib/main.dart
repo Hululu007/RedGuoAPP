@@ -11,6 +11,7 @@ import 'app_device.dart';
 import 'core_bridge.dart';
 import 'diary_service.dart';
 import 'local_store.dart';
+import 'picture_in_picture.dart';
 import 'ui/app.dart';
 import 'ui/theme/app_theme.dart';
 
@@ -29,7 +30,7 @@ Future<void> main() async {
       await windowManager.waitUntilReadyToShow(
         const WindowOptions(
           size: Size(1280, 800),
-          minimumSize: Size(960, 640),
+          minimumSize: desktopMinimumSize,
           center: true,
         ),
         () async => windowManager.show(),

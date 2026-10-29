@@ -18,6 +18,7 @@ import 'danmaku_overlay.dart';
 import '../widgets/status_view.dart';
 import '../widgets/follow_button.dart';
 import 'episode_grid.dart';
+import 'mini_player.dart';
 import 'playback_handle.dart';
 import 'playback_sheets.dart';
 import 'player_surface.dart';
@@ -32,10 +33,12 @@ class LandscapePlayerPage extends StatefulWidget {
     required this.store,
     required this.handle,
     this.onFullscreen,
+    this.onMiniWindow,
   });
   final LocalStore store;
   final PlaybackHandle handle;
   final VoidCallback? onFullscreen;
+  final VoidCallback? onMiniWindow;
 
   @override
   State<LandscapePlayerPage> createState() => _LandscapePlayerPageState();
@@ -131,10 +134,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) =>
-      _session.setForeground(
-        state == AppLifecycleState.resumed ||
-            desktopPlatform && state == AppLifecycleState.inactive,
-      );
+      _session.setForeground(playerVisible(state));
 
   void _bind() {
     final player = _session.player;
@@ -547,7 +547,8 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
                 () => unawaited(Navigator.maybePop(context)),
               ),
               const Spacer(),
-              _icon(Icons.picture_in_picture_alt_rounded, '小窗', null),
+              if (widget.onMiniWindow case final onMiniWindow?)
+                _icon(Icons.picture_in_picture_alt_rounded, '小窗', onMiniWindow),
               _icon(Icons.settings_rounded, '播放设置', _openSettings),
             ],
           ),
@@ -676,7 +677,8 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
               ),
               const SizedBox(width: 4),
               if (session.danmakuSupported) _danmakuButton(context),
-              _icon(Icons.picture_in_picture_alt_rounded, '小窗', null),
+              if (widget.onMiniWindow case final onMiniWindow?)
+                _icon(Icons.picture_in_picture_alt_rounded, '小窗', onMiniWindow),
               _icon(
                 Icons.settings_rounded,
                 '播放设置',

@@ -338,6 +338,18 @@ class LocalStore extends ChangeNotifier {
       ThemeColor.orange;
   bool get sideBarExpanded => preferences.getBool('sideBarExpanded') ?? true;
   bool get playerWide => preferences.getBool('playerWide') ?? false;
+  ({double left, double top, double extent})? get miniWindow {
+    final values = preferences
+        .getString('miniWindow')
+        ?.split(',')
+        .map(double.tryParse)
+        .toList();
+    if (values == null || values.length != 3 || values.contains(null)) {
+      return null;
+    }
+    return (left: values[0]!, top: values[1]!, extent: values[2]!);
+  }
+
   bool get televisionKeyboard =>
       preferences.getBool('televisionKeyboard') ?? false;
   bool get checkUpdates => preferences.getBool('checkUpdates') ?? true;
@@ -506,6 +518,14 @@ class LocalStore extends ChangeNotifier {
     await preferences.setBool('playerWide', value);
     _notify();
   });
+  Future<void> setMiniWindow(
+    ({double left, double top, double extent}) value,
+  ) => _queue(
+    () => preferences.setString(
+      'miniWindow',
+      '${value.left},${value.top},${value.extent}',
+    ),
+  );
   Future<void> setTelevisionKeyboard(bool value) => _queue(() async {
     await preferences.setBool('televisionKeyboard', value);
     _notify();

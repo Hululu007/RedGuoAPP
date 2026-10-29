@@ -4,7 +4,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterSurfaceView
 import android.app.UiModeManager
 import android.app.ActivityManager
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.os.Build
 import android.os.Bundle
 import android.os.BatteryManager
@@ -12,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -21,6 +24,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Uri
@@ -32,6 +36,7 @@ import android.view.SurfaceHolder
 import android.view.WindowManager
 import android.provider.Settings
 import androidx.annotation.ChecksSdkIntAtLeast
+import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
@@ -40,8 +45,20 @@ import kotlin.math.roundToInt
 private const val SURFACE_RESIZE_REDRAW_WAIT_MS = 100L
 private const val ORIENTATION_SETTLE_MS = 800L
 private const val CREATE_DOCUMENT_REQUEST = 7301
+private const val PICTURE_IN_PICTURE_ACTION = "com.duanju.duanju_app.PICTURE_IN_PICTURE_ACTION"
+
+private data class PlayerPictureInPicture(
+    val width: Int,
+    val height: Int,
+    val playing: Boolean,
+    val hasPrevious: Boolean,
+    val hasNext: Boolean,
+    val autoEnter: Boolean
+)
 
 class MainActivity : FlutterActivity() {
+    private var pictureInPicture: PlayerPictureInPicture? = null
+    private var pictureInPictureReceiver: BroadcastReceiver? = null
     private var documentResult: MethodChannel.Result? = null
     private var textInput: TextInputBridge? = null
     private var headroomReadAt = 0L
@@ -192,6 +209,31 @@ class MainActivity : FlutterActivity() {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
+        if (pictureInPictureSupported()) registerPictureInPictureReceiver()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun registerPictureInPictureReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val action = intent.getStringExtra("action") ?: return
+                deviceChannel?.invokeMethod("pictureInPictureAction", mapOf("action" to action))
+            }
+        }
+        val filter = IntentFilter(PICTURE_IN_PICTURE_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
+        pictureInPictureReceiver = receiver
+    }
+
+    override fun onDestroy() {
+        pictureInPictureReceiver?.let { unregisterReceiver(it) }
+        pictureInPictureReceiver = null
+        super.onDestroy()
     }
 
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
@@ -307,6 +349,20 @@ class MainActivity : FlutterActivity() {
                                 call.argument<Int>("right"),
                                 call.argument<Int>("bottom")
                             ))
+                        }
+                        "updatePictureInPicture" -> {
+                            pictureInPicture = if (call.arguments == null) null else PlayerPictureInPicture(
+                                call.argument<Int>("width") ?: 16,
+                                call.argument<Int>("height") ?: 9,
+                                call.argument<Boolean>("playing") ?: false,
+                                call.argument<Boolean>("hasPrevious") ?: false,
+                                call.argument<Boolean>("hasNext") ?: false,
+                                call.argument<Boolean>("autoEnter") ?: false
+                            )
+                            if (pictureInPictureSupported()) {
+                                runCatching { setPictureInPictureParams(pictureInPictureParams()) }
+                            }
+                            result.success(null)
                         }
                         "getBrightness" -> {
                             val lp = window.attributes
@@ -442,21 +498,65 @@ class MainActivity : FlutterActivity() {
         bottom: Int?
     ): Map<String, Any> {
         if (!pictureInPictureSupported()) return pictureInPictureStatus()
-        val safeWidth = width.coerceIn(1, 10000)
-        val safeHeight = height.coerceIn(1, 10000)
+        pictureInPicture = pictureInPicture?.copy(width = width, height = height)
+            ?: PlayerPictureInPicture(width, height, true, false, false, false)
         return runCatching {
-            val builder = PictureInPictureParams.Builder()
-            builder.setAspectRatio(Rational(safeWidth, safeHeight))
-            if (left != null && top != null && right != null && bottom != null &&
-                right > left && bottom > top) {
-                builder.setSourceRectHint(Rect(left, top, right, bottom))
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setAutoEnterEnabled(true)
-            }
-            val entered = enterPictureInPictureMode(builder.build())
+            val sourceRect = if (left != null && top != null && right != null && bottom != null &&
+                right > left && bottom > top) Rect(left, top, right, bottom) else null
+            val entered = enterPictureInPictureMode(pictureInPictureParams(sourceRect))
             pictureInPictureStatus() + ("requested" to entered)
         }.getOrElse { pictureInPictureStatus() }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun pictureInPictureParams(sourceRect: Rect? = null): PictureInPictureParams {
+        val state = pictureInPicture
+        val builder = PictureInPictureParams.Builder()
+        if (state != null) {
+            builder.setAspectRatio(Rational(state.width.coerceIn(1, 10000), state.height.coerceIn(1, 10000)))
+            builder.setActions(listOf(
+                pictureInPictureAction(1, "previous", R.drawable.ic_pip_previous, "上一集", state.hasPrevious),
+                if (state.playing) {
+                    pictureInPictureAction(2, "toggle", R.drawable.ic_pip_pause, "暂停", true)
+                } else {
+                    pictureInPictureAction(2, "toggle", R.drawable.ic_pip_play, "播放", true)
+                },
+                pictureInPictureAction(3, "next", R.drawable.ic_pip_next, "下一集", state.hasNext)
+            ))
+        } else {
+            builder.setActions(emptyList())
+        }
+        if (sourceRect != null) builder.setSourceRectHint(sourceRect)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(state?.autoEnter == true)
+        }
+        return builder.build()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun pictureInPictureAction(
+        request: Int,
+        action: String,
+        icon: Int,
+        title: String,
+        enabled: Boolean
+    ): RemoteAction {
+        val intent = Intent(PICTURE_IN_PICTURE_ACTION).setPackage(packageName).putExtra("action", action)
+        val pending = PendingIntent.getBroadcast(
+            this, request, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return RemoteAction(Icon.createWithResource(this, icon), title, title, pending).apply {
+            isEnabled = enabled
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pictureInPicture?.autoEnter != true || !pictureInPictureSupported()) return
+        deviceChannel?.invokeMethod("pictureInPicturePending", null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        val entered = runCatching { enterPictureInPictureMode(pictureInPictureParams()) }.getOrDefault(false)
+        if (!entered) deviceChannel?.invokeMethod("pictureInPictureChanged", mapOf("active" to false))
     }
 
     override fun onPictureInPictureModeChanged(

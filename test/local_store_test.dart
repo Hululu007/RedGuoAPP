@@ -87,6 +87,7 @@ void main() {
       await store.setFollowSystemColor(false);
       await store.setThemeColor(ThemeColor.teal);
       await store.setSideBarExpanded(false);
+      await store.setMiniWindow((left: -12, top: 40, extent: 640));
       await store.setDisplayMode('pad');
       await store.rememberSearch('剧名');
 
@@ -98,6 +99,7 @@ void main() {
       expect(restarted.followSystemColor, isFalse);
       expect(restarted.themeColor, ThemeColor.teal);
       expect(restarted.sideBarExpanded, isFalse);
+      expect(restarted.miniWindow, (left: -12.0, top: 40.0, extent: 640.0));
       expect(restarted.displayMode, 'pad');
       expect(restarted.recentSearches, ['剧名']);
     });
@@ -133,8 +135,11 @@ void main() {
           'sourceGateHash': '',
         }),
         'themeColor': 'unknown',
+        'miniWindow': '1,2',
       });
       expect(store.configurationError, isNull);
+      expect(store.miniWindow, isNull);
+      expect(store.playbackPreferences.autoPictureInPicture, isFalse);
       expect(store.displayMode, 'auto');
       expect(store.themeMode, 'system');
       expect(store.themeColor, ThemeColor.orange);
