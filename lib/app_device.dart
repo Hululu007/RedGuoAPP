@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'core_bridge.dart';
+
 class AppDevice {
   const AppDevice({this.television = false, this.version = ''});
   final bool television;
@@ -146,6 +148,23 @@ class AppDevice {
   static Future<void> setVolume(double value) async {
     try {
       await channel.invokeMethod<void>('setVolume', {'volume': value});
+    } catch (_) {}
+  }
+
+  static Future<String?> createDocument(String name, String mimeType) async {
+    try {
+      return await channel.invokeMethod<String>('createDocument', {
+        'name': name,
+        'mimeType': mimeType,
+      });
+    } on PlatformException catch (error) {
+      throw AppFailure(error.message ?? '无法创建文件');
+    }
+  }
+
+  static Future<void> deleteDocument(String uri) async {
+    try {
+      await channel.invokeMethod<bool>('deleteDocument', {'uri': uri});
     } catch (_) {}
   }
 

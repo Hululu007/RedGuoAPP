@@ -24,6 +24,7 @@ import android.graphics.Rect
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Rational
 import android.view.InputDevice
 import android.view.OrientationEventListener
@@ -38,8 +39,10 @@ import kotlin.math.roundToInt
 
 private const val SURFACE_RESIZE_REDRAW_WAIT_MS = 100L
 private const val ORIENTATION_SETTLE_MS = 800L
+private const val CREATE_DOCUMENT_REQUEST = 7301
 
 class MainActivity : FlutterActivity() {
+    private var documentResult: MethodChannel.Result? = null
     private var headroomReadAt = 0L
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
@@ -384,6 +387,31 @@ class MainActivity : FlutterActivity() {
                                 result.error("invalid_url", "播放地址为空", null)
                             }
                         }
+                        "createDocument" -> {
+                            val name = call.argument<String>("name")
+                            if (name.isNullOrEmpty() || documentResult != null) {
+                                result.error("invalid_document", "无法创建文件", null)
+                            } else {
+                                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = call.argument<String>("mimeType") ?: "application/octet-stream"
+                                    putExtra(Intent.EXTRA_TITLE, name)
+                                }
+                                try {
+                                    documentResult = result
+                                    startActivityForResult(intent, CREATE_DOCUMENT_REQUEST)
+                                } catch (e: Exception) {
+                                    documentResult = null
+                                    result.error("no_document_picker", "系统没有可用的文件保存界面", null)
+                                }
+                            }
+                        }
+                        "deleteDocument" -> {
+                            val uri = call.argument<String>("uri")
+                            result.success(uri != null && runCatching {
+                                DocumentsContract.deleteDocument(contentResolver, Uri.parse(uri))
+                            }.getOrDefault(false))
+                        }
                         else -> result.notImplemented()
                     }
                 }
@@ -438,6 +466,16 @@ class MainActivity : FlutterActivity() {
             "pictureInPictureChanged",
             mapOf("active" to isInPictureInPictureMode)
         )
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != CREATE_DOCUMENT_REQUEST) {
+            return super.onActivityResult(requestCode, resultCode, data)
+        }
+        val result = documentResult ?: return
+        documentResult = null
+        result.success(if (resultCode == RESULT_OK) data?.data?.toString() else null)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
