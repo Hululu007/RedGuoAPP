@@ -43,6 +43,7 @@ private const val CREATE_DOCUMENT_REQUEST = 7301
 
 class MainActivity : FlutterActivity() {
     private var documentResult: MethodChannel.Result? = null
+    private var textInput: TextInputBridge? = null
     private var headroomReadAt = 0L
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
@@ -237,6 +238,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        textInput = TextInputBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         deviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/device")
             .also { channel ->
                 channel.setMethodCallHandler { call, result ->
@@ -481,6 +483,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         orientationListener?.disable()
         orientationListener = null
+        textInput?.dispose()
+        textInput = null
         deviceChannel?.setMethodCallHandler(null)
         deviceChannel = null
         super.cleanUpFlutterEngine(flutterEngine)

@@ -338,6 +338,8 @@ class LocalStore extends ChangeNotifier {
       ThemeColor.orange;
   bool get sideBarExpanded => preferences.getBool('sideBarExpanded') ?? true;
   bool get playerWide => preferences.getBool('playerWide') ?? false;
+  bool get televisionKeyboard =>
+      preferences.getBool('televisionKeyboard') ?? false;
   bool get checkUpdates => preferences.getBool('checkUpdates') ?? true;
   bool get shareUsage => preferences.getBool('shareUsage') ?? true;
   String get ignoredUpdate => preferences.getString('ignoredUpdate') ?? '';
@@ -502,6 +504,10 @@ class LocalStore extends ChangeNotifier {
   });
   Future<void> setPlayerWide(bool value) => _queue(() async {
     await preferences.setBool('playerWide', value);
+    _notify();
+  });
+  Future<void> setTelevisionKeyboard(bool value) => _queue(() async {
+    await preferences.setBool('televisionKeyboard', value);
     _notify();
   });
   Future<void> setCheckUpdates(bool value) => _queue(() async {
