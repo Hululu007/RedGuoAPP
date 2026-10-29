@@ -30,10 +30,13 @@ class StorageView extends StatefulWidget {
 class _StorageViewState extends State<StorageView> {
   Map<String, dynamic>? _info;
   String? _error;
+  bool _loaded = false;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    _loaded = true;
     _refresh();
   }
 
@@ -80,12 +83,18 @@ class _StorageViewState extends State<StorageView> {
   Future<void> _move() async {
     final parent = await _pickParent();
     if (parent == null || !mounted) return;
+    await _migrate(parent, parent);
+  }
+
+  Future<void> _restore() => _migrate('', '应用默认目录');
+
+  Future<void> _migrate(String parent, String destination) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('迁移已下载内容？'),
         content: Text(
-          '将下载目录里的全部内容迁移到：\n$parent\n\n下载会先暂停，复制成功后清理旧目录。请保证目标有足够空间，并在完成后继续下载。',
+          '将下载目录里的全部内容迁移到：\n$destination\n\n下载会先暂停，复制成功后清理旧目录。请保证目标有足够空间，并在完成后继续下载。',
         ),
         actions: [
           TextButton(
@@ -147,6 +156,7 @@ class _StorageViewState extends State<StorageView> {
     final colors = Theme.of(context).colorScheme;
     final directory = info['directory'] as String? ?? '';
     final admin = widget.store.profile.admin;
+    final isDefault = info['default'] == true;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
@@ -191,6 +201,17 @@ class _StorageViewState extends State<StorageView> {
               subtitle: admin ? '下载会先暂停，复制成功后清理旧目录' : '需要管理员',
               enabled: admin,
               onTap: _move,
+            ),
+            const Divider(indent: 16, endIndent: 16),
+            SettingsTile(
+              title: '恢复默认下载目录',
+              subtitle: !admin
+                  ? '需要管理员'
+                  : isDefault
+                  ? '正在使用默认目录'
+                  : '迁移回应用默认目录',
+              enabled: admin && !isDefault,
+              onTap: _restore,
             ),
             const Divider(indent: 16, endIndent: 16),
             SettingsTile(title: '刷新用量', onTap: _refresh),

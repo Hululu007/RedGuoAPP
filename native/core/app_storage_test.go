@@ -61,6 +61,43 @@ func TestDownloadMigrationPreservesMediaAndRestartLocation(t *testing.T) {
 	}
 }
 
+func TestDownloadMigrationRestoresDefaultLocation(t *testing.T) {
+	engine, id := storageFixture(t)
+	if info, err := engine.storage(); err != nil || !info.Default {
+		t.Fatalf("fresh root not default: %+v %v", info, err)
+	}
+	if err := engine.moveDownloads(context.Background(), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	moved := engine.downloads.root
+	if info, err := engine.storage(); err != nil || info.Default {
+		t.Fatalf("moved root reported default: %+v %v", info, err)
+	}
+	if err := engine.moveDownloads(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if engine.downloads.root != nativeDefaultDownloads(engine.directory) {
+		t.Fatal("root not restored")
+	}
+	if _, err := os.Stat(filepath.Join(engine.directory, "download-location.json")); !os.IsNotExist(err) {
+		t.Fatal("location file kept after restore")
+	}
+	if _, err := os.Stat(moved); !os.IsNotExist(err) {
+		t.Fatal("moved media not cleaned after restore")
+	}
+	if body, err := os.ReadFile(filepath.Join(engine.downloads.root, id, "media.mp4")); err != nil || string(body) != "synthetic-video" {
+		t.Fatalf("media not restored: %v", err)
+	}
+	if info, err := engine.storage(); err != nil || !info.Default {
+		t.Fatalf("restored root not default: %+v %v", info, err)
+	}
+	restarted := newNativeDownloads(engine)
+	defer restarted.close()
+	if restarted.root != engine.downloads.root || restarted.jobs[id] == nil {
+		t.Fatal("restart lost restored location")
+	}
+}
+
 func TestMigrationFailureLeavesSourceAndExistingTargetIntact(t *testing.T) {
 	engine, _ := storageFixture(t)
 	old := engine.downloads.root
