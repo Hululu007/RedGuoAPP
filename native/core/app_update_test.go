@@ -18,7 +18,7 @@ func withUpdateServer(t *testing.T, handler http.HandlerFunc) *nativeEngine {
 	previous := nativeUpdateServer
 	nativeUpdateServer = server.URL
 	t.Cleanup(func() { nativeUpdateServer = previous })
-	engine, err := newNativeEngine(t.TempDir())
+	engine, err := newNativeEngine(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestNativeUpdateServerUnset(t *testing.T) {
 	previous := nativeUpdateServer
 	nativeUpdateServer = ""
 	defer func() { nativeUpdateServer = previous }()
-	engine, err := newNativeEngine(t.TempDir())
+	engine, err := newNativeEngine(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

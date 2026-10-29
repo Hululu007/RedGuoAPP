@@ -88,6 +88,9 @@ void main() {
       await store.setThemeColor(ThemeColor.teal);
       await store.setSideBarExpanded(false);
       await store.setMiniWindow((left: -12, top: 40, extent: 640));
+      await store.setAutoExport(true);
+      await store.setDeleteAfterAutoExport(true);
+      await store.setDeleteAfterManualExport(true);
       await store.setDisplayMode('pad');
       await store.rememberSearch('剧名');
 
@@ -100,6 +103,9 @@ void main() {
       expect(restarted.themeColor, ThemeColor.teal);
       expect(restarted.sideBarExpanded, isFalse);
       expect(restarted.miniWindow, (left: -12.0, top: 40.0, extent: 640.0));
+      expect(restarted.autoExport, isTrue);
+      expect(restarted.deleteAfterAutoExport, isTrue);
+      expect(restarted.deleteAfterManualExport, isTrue);
       expect(restarted.displayMode, 'pad');
       expect(restarted.recentSearches, ['剧名']);
     });

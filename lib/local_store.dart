@@ -353,6 +353,11 @@ class LocalStore extends ChangeNotifier {
   bool get televisionKeyboard =>
       preferences.getBool('televisionKeyboard') ?? false;
   bool get checkUpdates => preferences.getBool('checkUpdates') ?? true;
+  bool get autoExport => preferences.getBool('autoExport') ?? false;
+  bool get deleteAfterAutoExport =>
+      preferences.getBool('deleteAfterAutoExport') ?? false;
+  bool get deleteAfterManualExport =>
+      preferences.getBool('deleteAfterManualExport') ?? false;
   bool get shareUsage => preferences.getBool('shareUsage') ?? true;
   String get ignoredUpdate => preferences.getString('ignoredUpdate') ?? '';
 
@@ -532,6 +537,18 @@ class LocalStore extends ChangeNotifier {
   });
   Future<void> setCheckUpdates(bool value) => _queue(() async {
     await preferences.setBool('checkUpdates', value);
+    _notify();
+  });
+  Future<void> setAutoExport(bool value) => _queue(() async {
+    await preferences.setBool('autoExport', value);
+    _notify();
+  });
+  Future<void> setDeleteAfterAutoExport(bool value) => _queue(() async {
+    await preferences.setBool('deleteAfterAutoExport', value);
+    _notify();
+  });
+  Future<void> setDeleteAfterManualExport(bool value) => _queue(() async {
+    await preferences.setBool('deleteAfterManualExport', value);
     _notify();
   });
   Future<void> setShareUsage(bool value) => _queue(() async {

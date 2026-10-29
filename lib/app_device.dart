@@ -162,6 +162,30 @@ class AppDevice {
     }
   }
 
+  static Future<bool> requestVideoExport() async {
+    try {
+      return await channel.invokeMethod<bool>('requestVideoExport') ?? false;
+    } on PlatformException catch (error) {
+      throw AppFailure(error.message ?? '无法申请存储权限');
+    }
+  }
+
+  static Future<void> exportVideo(
+    String source,
+    String folder,
+    String name,
+  ) async {
+    try {
+      await channel.invokeMethod<void>('exportVideo', {
+        'source': source,
+        'folder': folder,
+        'name': name,
+      });
+    } on PlatformException catch (error) {
+      throw AppFailure(error.message ?? '导出失败');
+    }
+  }
+
   static Future<void> deleteDocument(String uri) async {
     try {
       await channel.invokeMethod<bool>('deleteDocument', {'uri': uri});

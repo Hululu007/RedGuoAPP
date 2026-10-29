@@ -2,6 +2,7 @@ package com.duanju.duanju_app
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterSurfaceView
+import android.Manifest
 import android.app.UiModeManager
 import android.app.ActivityManager
 import android.app.PendingIntent
@@ -16,6 +17,8 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -26,9 +29,12 @@ import android.content.res.Resources
 import android.graphics.Rect
 import android.graphics.drawable.Icon
 import android.media.AudioManager
+import android.media.MediaScannerConnection
 import android.net.ConnectivityManager
 import android.net.Uri
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.util.Rational
 import android.view.InputDevice
 import android.view.OrientationEventListener
@@ -40,11 +46,14 @@ import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.IOException
 import kotlin.math.roundToInt
 
 private const val SURFACE_RESIZE_REDRAW_WAIT_MS = 100L
 private const val ORIENTATION_SETTLE_MS = 800L
 private const val CREATE_DOCUMENT_REQUEST = 7301
+private const val STORAGE_PERMISSION_REQUEST = 7302
 private const val PICTURE_IN_PICTURE_ACTION = "com.duanju.duanju_app.PICTURE_IN_PICTURE_ACTION"
 
 private data class PlayerPictureInPicture(
@@ -60,6 +69,7 @@ class MainActivity : FlutterActivity() {
     private var pictureInPicture: PlayerPictureInPicture? = null
     private var pictureInPictureReceiver: BroadcastReceiver? = null
     private var documentResult: MethodChannel.Result? = null
+    private var permissionResult: MethodChannel.Result? = null
     private var textInput: TextInputBridge? = null
     private var headroomReadAt = 0L
     private var thermalHeadroom: Double? = null
@@ -470,10 +480,95 @@ class MainActivity : FlutterActivity() {
                                 DocumentsContract.deleteDocument(contentResolver, Uri.parse(uri))
                             }.getOrDefault(false))
                         }
+                        "requestVideoExport" -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                                PackageManager.PERMISSION_GRANTED) {
+                                result.success(true)
+                            } else if (permissionResult != null) {
+                                result.error("permission_pending", "正在申请存储权限", null)
+                            } else {
+                                permissionResult = result
+                                requestPermissions(
+                                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                                    STORAGE_PERMISSION_REQUEST
+                                )
+                            }
+                        }
+                        "exportVideo" -> {
+                            val source = call.argument<String>("source")
+                            val folder = call.argument<String>("folder")
+                            val name = call.argument<String>("name")
+                            if (source.isNullOrEmpty() || folder.isNullOrEmpty() || name.isNullOrEmpty()) {
+                                result.error("invalid_export", "导出参数无效", null)
+                            } else {
+                                Thread {
+                                    val outcome = runCatching { exportVideo(File(source), folder, name) }
+                                    runOnUiThread {
+                                        outcome.fold(
+                                            { result.success(null) },
+                                            { result.error("export_failed", "导出失败：${it.message}", null) }
+                                        )
+                                    }
+                                }.start()
+                            }
+                        }
                         else -> result.notImplemented()
                     }
                 }
             }
+    }
+
+    private fun exportVideo(source: File, folder: String, name: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            @Suppress("DEPRECATION")
+            val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            val directory = File(movies, folder)
+            if (!directory.isDirectory && !directory.mkdirs()) throw IOException("无法创建 Movies/$folder")
+            val target = File(directory, name)
+            source.copyTo(target, overwrite = true)
+            MediaScannerConnection.scanFile(this, arrayOf(target.path), arrayOf("video/mp4"), null)
+            return
+        }
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val relativePath = "${Environment.DIRECTORY_MOVIES}/$folder/"
+        val existing = contentResolver.query(
+            collection,
+            arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media.RELATIVE_PATH}=? AND ${MediaStore.Video.Media.DISPLAY_NAME}=?",
+            arrayOf(relativePath, name),
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) ContentUris.withAppendedId(collection, cursor.getLong(0)) else null
+        }
+        val uri = existing ?: contentResolver.insert(collection, ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, relativePath)
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }) ?: throw IOException("无法在 Movies 中创建文件")
+        try {
+            val output = contentResolver.openOutputStream(uri, "wt") ?: throw IOException("无法写入 Movies")
+            output.use { stream -> source.inputStream().use { it.copyTo(stream) } }
+            contentResolver.update(uri, ContentValues().apply {
+                put(MediaStore.Video.Media.IS_PENDING, 0)
+            }, null, null)
+        } catch (e: Exception) {
+            if (existing == null) runCatching { contentResolver.delete(uri, null, null) }
+            throw e
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != STORAGE_PERMISSION_REQUEST) return
+        val result = permissionResult ?: return
+        permissionResult = null
+        result.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
     }
 
     @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.O)

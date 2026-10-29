@@ -23,7 +23,7 @@ func (engine *nativeEngine) storage() (nativeStorageInfo, error) {
 	manager.mu.Lock()
 	root := manager.root
 	manager.mu.Unlock()
-	info := nativeStorageInfo{Directory: root, Default: root == nativeDefaultDownloads(engine.directory)}
+	info := nativeStorageInfo{Directory: root, Default: root == engine.defaultDownloads}
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -46,15 +46,40 @@ func (engine *nativeEngine) storage() (nativeStorageInfo, error) {
 	return info, nil
 }
 
-func nativeDownloadLocation(directory string) string {
+func nativeDownloadLocation(directory, fallback string) string {
 	var value struct {
 		Directory string `json:"directory"`
 	}
-	body, _ := os.ReadFile(filepath.Join(directory, "download-location.json"))
+	location := filepath.Join(directory, "download-location.json")
+	body, _ := os.ReadFile(location)
 	if json.Unmarshal(body, &value) == nil && filepath.IsAbs(value.Directory) {
 		return filepath.Clean(value.Directory)
 	}
-	return nativeDefaultDownloads(directory)
+	legacy := nativeDefaultDownloads(directory)
+	if fallback != legacy && nativeDownloadsInUse(legacy) {
+		data, _ := json.Marshal(map[string]string{"directory": legacy})
+		_ = nativeDownloadWrite(location, data)
+		return legacy
+	}
+	return fallback
+}
+
+func nativeDownloadsInUse(root string) bool {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Name() != "index.json" {
+			return true
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(root, "index.json"))
+	if os.IsNotExist(err) {
+		return false
+	}
+	var records []json.RawMessage
+	return err != nil || json.Unmarshal(body, &records) != nil || len(records) > 0
 }
 
 func nativeDefaultDownloads(directory string) string {
@@ -117,7 +142,7 @@ func nativeCopyTree(ctx context.Context, source, target string) error {
 }
 
 func (engine *nativeEngine) moveDownloads(ctx context.Context, parent string) error {
-	target := nativeDefaultDownloads(engine.directory)
+	target := engine.defaultDownloads
 	if parent != "" {
 		if !filepath.IsAbs(parent) {
 			return errors.New("请选择有效的保存目录")
@@ -188,7 +213,7 @@ func (engine *nativeEngine) moveDownloads(ctx context.Context, parent string) er
 	}
 	location := filepath.Join(engine.directory, "download-location.json")
 	var persistErr error
-	if parent == "" {
+	if target == nativeDefaultDownloads(engine.directory) {
 		if err := os.Remove(location); !os.IsNotExist(err) {
 			persistErr = err
 		}

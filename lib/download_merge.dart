@@ -20,15 +20,19 @@ String episodeRanges(List<int> numbers) {
   return parts.join('、');
 }
 
-String mergeFileName(String title, List<int> numbers) {
+String safeFileName(String title) {
   final name = title
       .replaceAll(RegExp(r'[\x00-\x1f\x7f<>:"/\\|?*]'), '_')
       .trim();
+  return name.isEmpty ? '未命名' : name;
+}
+
+String mergeFileName(String title, List<int> numbers) {
   final ranges = episodeRanges(numbers);
   final episodes = ranges.length <= 40
       ? '第$ranges集'
       : '第${numbers.first}-${numbers.last}集等${numbers.length}集';
-  return '${name.isEmpty ? '未命名' : name} $episodes.mp4';
+  return '${safeFileName(title)} $episodes.mp4';
 }
 
 String _signature(MediaProbe probe) {

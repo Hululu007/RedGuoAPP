@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../app_device.dart';
+import '../../core_bridge.dart';
 import '../../download_collections.dart';
+import '../../download_export.dart';
+import '../../download_merge.dart';
 import '../../download_overview.dart';
 import '../../local_store.dart';
 import '../../models.dart';
@@ -99,6 +104,79 @@ class _DownloadedDramaPageState extends State<DownloadedDramaPage> {
         if (ids.contains(job.id)) job,
     ]);
     if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _export(DownloadedDrama item, Set<String> ids) async {
+    final repository = AppScope.of(context).repository;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final jobs = [
+      for (final job in item.episodes)
+        if (ids.contains(job.id)) job,
+    ];
+    try {
+      if (!await AppDevice.requestVideoExport()) {
+        throw AppFailure('未获得存储权限，无法导出');
+      }
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('$error')));
+      return;
+    }
+    if (!mounted) return;
+    final delete = widget.store.deleteAfterManualExport;
+    final exported = ValueNotifier(0);
+    setState(() => _busy = true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('导出到 Movies'),
+          content: ValueListenableBuilder(
+            valueListenable: exported,
+            builder: (context, count, _) => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: 16,
+              children: [
+                Text('已导出 $count / ${jobs.length} 集'),
+                LinearProgressIndicator(value: count / jobs.length),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final failures = <String>[];
+    for (final job in jobs) {
+      try {
+        await exportDownload(repository, job, delete: delete);
+        exported.value++;
+      } catch (error) {
+        failures.add('$error');
+      }
+    }
+    navigator.pop();
+    await widget.downloads.refresh();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failures.isEmpty
+              ? '已导出到 Movies/${safeFileName(item.drama.title)}'
+              : '${failures.length} 集未能导出：${failures.first}',
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (delete && exported.value == item.episodes.length) {
+      Navigator.pop(context);
+    } else {
+      setState(() {
+        _busy = false;
+        _selection = null;
+      });
+    }
   }
 
   Future<void> _play(DownloadedDrama item, int index) async {
@@ -197,6 +275,18 @@ class _DownloadedDramaPageState extends State<DownloadedDramaPage> {
     ),
   );
 
+  Widget _exportButton(DownloadedDrama item, Set<String> selection) =>
+      FocusRing(
+        radius: 20,
+        child: FilledButton.tonalIcon(
+          onPressed: selection.isEmpty || _busy
+              ? null
+              : () => _export(item, selection),
+          icon: const Icon(Icons.drive_folder_upload_outlined, size: 18),
+          label: const Text('导出'),
+        ),
+      );
+
   Widget _deleteButton(DownloadedDrama item, Set<String> selection) {
     final colors = Theme.of(context).colorScheme;
     return FocusRing(
@@ -257,6 +347,8 @@ class _DownloadedDramaPageState extends State<DownloadedDramaPage> {
                     spacing: 12,
                     children: [
                       Expanded(child: _mergeButton(item, selection)),
+                      if (Platform.isAndroid)
+                        Expanded(child: _exportButton(item, selection)),
                       Expanded(child: _deleteButton(item, selection)),
                     ],
                   ),
@@ -311,6 +403,7 @@ class _DownloadedDramaPageState extends State<DownloadedDramaPage> {
                     if (editing) ...[
                       _selectAll(item, selection),
                       _mergeButton(item, selection),
+                      if (Platform.isAndroid) _exportButton(item, selection),
                       _deleteButton(item, selection),
                       _textButton(
                         '完成',

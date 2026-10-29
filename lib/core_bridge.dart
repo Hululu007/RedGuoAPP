@@ -584,9 +584,13 @@ class NativeRepository extends AppRepository {
     if (!background) {
       DiaryService.nativeLogPath = path.join(directory.path, 'logs', 'app.log');
     }
+    final external = Platform.isAndroid
+        ? await getExternalStorageDirectory()
+        : null;
     final build = await _call({
       'action': 'initialize',
       'directory': directory.path,
+      if (external != null) 'downloads': path.join(external.path, 'downloads'),
     });
     if (build['allSources'] != allSourcesEnabled) {
       throw AppFailure('应用与原生核心的站源版本不一致，请使用完整安装包重新安装');
