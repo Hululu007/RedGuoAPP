@@ -258,7 +258,7 @@ class _AppShellState extends State<AppShell> {
       ],
     );
     final store = widget.store;
-    if (_tab != AppTab.explore || store.source.isEmpty) {
+    if (store.source.isEmpty) {
       return SizedBox(height: 48, child: tabs);
     }
     final source = SourceSite.byId(store.source);
