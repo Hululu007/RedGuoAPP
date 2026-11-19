@@ -11,6 +11,7 @@ import '../../media_controls.dart';
 import '../../playback_preferences.dart';
 import '../../resource_settings.dart';
 import '../../resource_settings_editor.dart';
+import '../../update_channel.dart';
 import '../../window_on_top.dart';
 import '../app_scope.dart';
 import '../player/danmaku_settings.dart';
@@ -184,7 +185,8 @@ class SettingsSection extends StatelessWidget {
           if (Platform.isAndroid)
             ValueTile<PlaybackKernel>(
               title: '播放内核',
-              subtitle: 'ExoPlayer 更省电、打开更快，MPV 兼容性更好；ExoPlayer 解不了片源时会自动改用 MPV 续播',
+              subtitle:
+                  'ExoPlayer 更省电、打开更快，MPV 兼容性更好；ExoPlayer 解不了片源时会自动改用 MPV 续播',
               options: {
                 for (final kernel in PlaybackKernel.values)
                   kernel: kernel.label,
@@ -541,7 +543,7 @@ class SettingsSection extends StatelessWidget {
       SettingsCard(
         children: [
           _AppNameTile(version: version, store: store),
-          const _UpdateCheckTile(),
+          _UpdateCheckTile(store: store),
           SwitchTile(
             title: '启动时检查更新',
             subtitle: '有新版本时每次启动都会提示，可在提示里忽略此版本',
@@ -549,6 +551,7 @@ class SettingsSection extends StatelessWidget {
             onChanged: (value) =>
                 saveSetting(context, () => store.setCheckUpdates(value)),
           ),
+          _UpdateChannelTile(store: store),
         ],
       ),
       SettingsCard(
@@ -599,7 +602,9 @@ class SettingsSection extends StatelessWidget {
 }
 
 class _UpdateCheckTile extends StatefulWidget {
-  const _UpdateCheckTile();
+  const _UpdateCheckTile({required this.store});
+
+  final LocalStore store;
 
   @override
   State<_UpdateCheckTile> createState() => _UpdateCheckTileState();
@@ -611,7 +616,7 @@ class _UpdateCheckTileState extends State<_UpdateCheckTile> {
   Future<void> _check() async {
     setState(() => _busy = true);
     try {
-      await checkUpdateManually(context);
+      await checkUpdateManually(context, widget.store);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -624,6 +629,34 @@ class _UpdateCheckTileState extends State<_UpdateCheckTile> {
     enabled: !_busy,
     onTap: _check,
   );
+}
+
+class _UpdateChannelTile extends StatelessWidget {
+  const _UpdateChannelTile({required this.store});
+
+  final LocalStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final channel = parseUpdateChannel(store.updateChannel);
+    return SettingsTile(
+      title: '更新线路',
+      subtitle: channel.hint,
+      value: channel.label,
+      onTap: () async {
+        final picked = await showOptionDialog<String>(
+          context,
+          title: '更新线路',
+          options: {
+            for (final item in UpdateChannel.values) item.value: item.label,
+          },
+          selected: channel.value,
+        );
+        if (picked == null || !context.mounted) return;
+        await saveSetting(context, () => store.setUpdateChannel(picked));
+      },
+    );
+  }
 }
 
 class _AppNameTile extends StatefulWidget {

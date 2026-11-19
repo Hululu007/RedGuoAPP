@@ -29,7 +29,7 @@ const _movedFlags = {
   'deleteAfterManualExport': 'deleteAfterManualExport',
   'televisionKeyboard': 'televisionKeyboard',
 };
-const _movedTexts = {'themeColor', 'ignoredUpdate'};
+const _movedTexts = {'themeColor', 'ignoredUpdate', 'updateChannel'};
 const _backupFlags = {
   'checkUpdates',
   'exportAfterDownload',
@@ -495,6 +495,7 @@ class LocalStore extends ChangeNotifier {
   bool get sideBarExpanded => preferences.getBool('sideBarExpanded') ?? true;
   bool get playerWide => preferences.getBool('playerWide') ?? false;
   double get playerVolume => preferences.getDouble('playerVolume') ?? 100;
+
   /// 该设备上 ExoPlayer 硬解过不了 HEVC 等片源，播放会话检测到后置位，
   /// 之后开播直接走 MPV；在设置里重新选回 Exo 会清掉这个标记。
   bool get exoDecoderBroken => _flag('exoDecoderBroken', false);
@@ -521,6 +522,12 @@ class LocalStore extends ChangeNotifier {
   };
   bool get blurAllCovers => _flag('blurAllCovers', true);
   bool get checkUpdates => _flag('checkUpdates', true);
+
+  /// 更新线路：auto / domestic / direct / proxy，未知值回到自动。
+  String get updateChannel => switch (_settings['updateChannel']) {
+    'domestic' || 'direct' || 'proxy' => _settings['updateChannel'] as String,
+    _ => 'auto',
+  };
   bool get autoExport => _flag('exportAfterDownload', false);
   bool get deleteAfterAutoExport => _flag('deleteAfterAutoExport', false);
   bool get deleteAfterManualExport => _flag('deleteAfterManualExport', false);
@@ -674,6 +681,13 @@ class LocalStore extends ChangeNotifier {
       : Future.value();
   Future<void> setBlurAllCovers(bool value) => _setting('blurAllCovers', value);
   Future<void> setCheckUpdates(bool value) => _setting('checkUpdates', value);
+  Future<void> setUpdateChannel(String value) => switch (value) {
+    'auto' ||
+    'domestic' ||
+    'direct' ||
+    'proxy' => _setting('updateChannel', value),
+    _ => Future.value(),
+  };
   Future<void> setAutoExport(bool value) =>
       _setting('exportAfterDownload', value);
   Future<void> setDeleteAfterAutoExport(bool value) =>
@@ -1104,6 +1118,7 @@ class LocalStore extends ChangeNotifier {
       'blurAllCovers': blurAllCovers,
       'forceLogin': forceLogin,
       'checkUpdates': checkUpdates,
+      'updateChannel': updateChannel,
       'exportAfterDownload': autoExport,
       'deleteAfterAutoExport': deleteAfterAutoExport,
       'deleteAfterManualExport': deleteAfterManualExport,

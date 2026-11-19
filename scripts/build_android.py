@@ -18,6 +18,11 @@ if platform.system() == 'Darwin':
     env['LC_ALL'] = 'en_US.UTF-8'
 env.setdefault('GOPROXY', 'https://goproxy.cn,direct')
 env.setdefault('GOSUMDB', 'off')
+# 国外 CI 直连官方源更快；本地/国内环境走镜像，否则 Gradle 拉
+# io.flutter:*_release 引擎产物会卡在 download.flutter.io 上十几分钟。
+if not env.get('CI') and not env.get('GITHUB_ACTIONS'):
+    env.setdefault('FLUTTER_STORAGE_BASE_URL', 'https://storage.flutter-io.cn')
+    env.setdefault('PUB_HOSTED_URL', 'https://pub.flutter-io.cn')
 flutter = shutil.which('flutter')
 if not flutter:
     raise SystemExit('请先将 Flutter SDK 的 bin 目录加入 PATH。')

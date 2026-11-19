@@ -19,6 +19,7 @@ import 'download_collections.dart';
 import 'resource_settings.dart';
 import 'diary_service.dart';
 import 'app_update.dart';
+import 'update_channel.dart';
 import 'sorani_account.dart';
 import 'source_modules.dart';
 
@@ -186,7 +187,7 @@ abstract class AppRepository {
     Episode episode, {
     int quality = 0,
   }) => resolve(drama, episode, quality: quality);
-  Future<AppUpdate?> checkUpdate(String version) async => null;
+  Future<AppUpdate?> checkUpdate() async => null;
   Future<bool> sourceDevices(String source, {bool register = false}) async =>
       true;
   Future<SoraniAccount> soraniAccount() async => const SoraniAccount();
@@ -570,14 +571,31 @@ class NativeRepository extends AppRepository {
   List<DownloadJob> _visibleDownloads = const [];
 
   @override
-  Future<AppUpdate?> checkUpdate(String version) async {
-    final result = await _call({'action': 'checkUpdate', 'version': version});
-    return result['available'] == true
-        ? AppUpdate(
-            version: result['version'] as String,
-            url: result['url'] as String,
-          )
-        : null;
+  Future<AppUpdate?> checkUpdate() async {
+    final channel = parseUpdateChannel(access?.updateChannel);
+    final settings = await _updateSettings();
+    final proxy = proxyFrom(
+      settings?.proxyMode ?? 'auto',
+      settings?.proxyUrl ?? '',
+    );
+    try {
+      return await fetchLatestUpdate(
+        channel: channel,
+        installed: await currentVersionCode(),
+        proxy: proxy,
+      );
+    } on UpdateFailure catch (error) {
+      throw AppFailure(error.message);
+    }
+  }
+
+  /// 资源设置可能因为权限或平台原因取不到，检查更新时退回直连。
+  Future<ResourceSettings?> _updateSettings() async {
+    try {
+      return await resourceSettings();
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

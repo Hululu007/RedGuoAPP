@@ -1,0 +1,419 @@
+name: 安卓正式版32位和64位发布
+
+# 手动触发。产物只发布到 AppDownload（GitHub），GitCode 由 AppDownload 侧的工作流同步。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本名，如 2.0.4。留空 = 上一版 +0.0.1；填了这次就用它，下次自动从它往后延续'
+        type: string
+        required: false
+        default: ''
+      notes:
+        description: '本次更新说明，可用 \n 换行；留空则用仓库里的 release-notes.md'
+        type: string
+        required: false
+        default: ''
+      dry_run:
+        description: '只构建不发版（勾选后不上传任何平台）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 同一时间只允许一个发布任务，防止版本号撞车
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+env:
+  PACKAGE_NAME: com.x.redguoapp
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+  PYTHONUTF8: '1'
+  FLUTTER_VERSION: '3.47.9'
+  # 什么都没填、仓库里也没有历史版本时的兜底版本名
+  INITIAL_VERSION: '1.0.0'
+  NDK_VERSION: '28.2.13676358'
+  # 发布目标
+  GH_RELEASE_REPO: xycvip/AppDownload
+  TAG_PREFIX: redguo-
+  GITCODE_OWNER: xycvip
+  GITCODE_REPO: redguo
+
+jobs:
+  android:
+    name: 构建并发布 32 位 + 64 位
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      # ---------- 版本号 ----------
+      # 版本名：输入框填了就用它；留空则在上一版基础上 +0.0.1；都没有则用 INITIAL_VERSION
+      # 内部版本号：当天日期 8 位 + 当天序号 2 位，100 次取模回绕
+      #   tag 形如 redguo-v1.0.0-2026111901
+      - name: 计算版本号
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.APPDOWNLOAD_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::缺少 APPDOWNLOAD_TOKEN，无法读取 AppDownload 的版本记录"
+            echo "请在仓库 Secrets 里添加 APPDOWNLOAD_TOKEN（GitHub 个人令牌，勾选 repo 即可）"
+            exit 1
+          fi
+
+          today=$(TZ=Asia/Shanghai date +%Y%m%d)
+
+          latest=$(gh api "repos/${GH_RELEASE_REPO}/releases?per_page=100" \
+            --jq '.[].tag_name' 2>/dev/null \
+            | grep -E "^${TAG_PREFIX}v[0-9]+\.[0-9]+\.[0-9]+-[0-9]{10}$" \
+            | sort -V | tail -n1 || true)
+
+          # 手动指定的版本名：本次直接用它，之后的运行会在它基础上继续 +0.0.1
+          # 允许写成 v2.0.4 / 2.0.4+116 / 2.0.4-2026111901，统一取出 X.Y.Z
+          want="${INPUT_VERSION:-}"
+          want="${want#[vV]}"
+          want="${want%%+*}"
+          want="${want%%-*}"
+          want=$(printf '%s' "$want" | tr -d '[:space:]')
+
+          if [ -n "$want" ] && ! printf '%s' "$want" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::版本号格式不对：'${INPUT_VERSION}'，应填 1.2.3 这样的三段数字"
+            exit 1
+          fi
+
+          seq=1
+          latest_name=""
+
+          if [ -n "$latest" ]; then
+            body="${latest#${TAG_PREFIX}v}"
+            latest_name="${body%%-*}"
+
+            last="${body##*-}"
+            if [ "${last:0:8}" = "$today" ]; then
+              seq=$(( 10#${last:8:2} + 1 ))
+            fi
+          fi
+
+          if [ -n "$want" ]; then
+            name="$want"
+            if [ "$want" = "$latest_name" ]; then
+              echo "::notice::输入的版本 ${name} 与上一版相同，按重发处理，内部版本号会继续递增"
+            elif [ -n "$latest_name" ] \
+              && [ "$(printf '%s\n%s\n' "$latest_name" "$want" | sort -V | tail -n1)" != "$want" ]; then
+              echo "::warning::输入的版本 ${want} 低于上一版 ${latest_name}，版本名出现回退"
+            fi
+          elif [ -n "$latest_name" ]; then
+            IFS=. read -r major minor patch <<< "$latest_name"
+            name="${major}.${minor}.$((patch + 1))"
+          else
+            name="${INITIAL_VERSION}"
+          fi
+
+          if [ "$seq" -ge 100 ]; then
+            seq=0
+            echo "::warning::当天构建已满 100 次，内部版本号回绕为 ${today}00，会小于当天前一次的版本号"
+          fi
+
+          code=$(printf '%s%02d' "$today" "$seq")
+          tag="${TAG_PREFIX}v${name}-${code}"
+
+          # 同一天重跑但上次没发成功，tag 可能已存在，往后顺延
+          while gh api "repos/${GH_RELEASE_REPO}/releases/tags/${tag}" >/dev/null 2>&1; do
+            seq=$(( (seq + 1) % 100 ))
+            code=$(printf '%s%02d' "$today" "$seq")
+            tag="${TAG_PREFIX}v${name}-${code}"
+          done
+
+          echo "版本名：${name}"
+          echo "内部版本号：${code}"
+          echo "tag：${tag}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      # ---------- 构建环境 ----------
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-36
+            build-tools;36.0.0
+          accept-android-sdk-licenses: true
+
+      - name: 安装 NDK
+        run: sdkmanager "ndk;${NDK_VERSION}"
+
+      - name: 准备依赖
+        run: |
+          set -euo pipefail
+          flutter pub get
+          (cd native && go mod download)
+
+      # ---------- 签名 ----------
+      - name: 配置签名
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::未配置签名密钥，本次产物为 debug 签名，无法覆盖已装的正式版"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
+            echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}"
+            echo "ANDROID_KEY_PASSWORD=${KEY_PASSWORD}"
+          } >> "$GITHUB_ENV"
+          echo "签名文件已就绪"
+
+      # ---------- 构建 ----------
+      - name: 构建并重命名产物
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          set -euo pipefail
+          sed -i "s/^version:.*/version: ${NAME}+${CODE}/" pubspec.yaml
+          grep -n '^version:' pubspec.yaml
+
+          rm -rf dist/android
+          python scripts/build_android.py --abi armeabi-v7a --abi arm64-v8a
+
+          mv "dist/android/guoapp-${NAME}+${CODE}-armeabi-v7a.apk" "dist/android/RedGuo-${NAME}-v7a.apk"
+          mv "dist/android/guoapp-${NAME}+${CODE}-arm64-v8a.apk"   "dist/android/RedGuo-${NAME}-v8a.apk"
+
+          (cd dist/android && sha256sum RedGuo-*.apk > SHA256SUMS)
+
+          ls -lh dist/android
+
+      - name: 校验产物
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+          EXPECTED_CERT: ${{ vars.SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n1)
+
+          check() {
+            local apk="$1" abi="$2"
+            [ -f "$apk" ] || { echo "::error::缺少产物 $apk"; ls -l dist/android || true; exit 1; }
+            echo "== $apk"
+            local first
+            first=$("$AAPT" dump badging "$apk" | head -n1)
+            echo "$first"
+            echo "$first" | grep -q "versionCode='${CODE}'" \
+              || { echo "::error::$apk 的 versionCode 不是 ${CODE}"; exit 1; }
+            unzip -l "$apk" | grep -q "lib/${abi}/libduanju_core.so" \
+              || { echo "::error::$apk 缺少 ${abi} 原生库"; exit 1; }
+          }
+
+          check "dist/android/RedGuo-${NAME}-v7a.apk" armeabi-v7a
+          check "dist/android/RedGuo-${NAME}-v8a.apk" arm64-v8a
+
+          if [ -n "${EXPECTED_CERT:-}" ]; then
+            APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
+            expected=$(printf '%s' "$EXPECTED_CERT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
+            for apk in dist/android/*.apk; do
+              "$APKSIGNER" verify --print-certs "$apk" 2>&1 | tr -d ':' | tr '[:upper:]' '[:lower:]' | grep -q "$expected" \
+                || { echo "::error::$(basename "$apk") 签名证书不匹配"; exit 1; }
+            done
+            echo "签名证书校验通过"
+          else
+            echo "::warning::未设置仓库变量 SIGNING_CERT_SHA256，跳过证书校验"
+          fi
+
+      - name: 保存构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ steps.ver.outputs.code }}
+          path: dist/android/*
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------- 发布说明 ----------
+      - name: 生成发布说明
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+
+          # 更新说明：优先用仓库里的 release-notes.md，其次用输入框
+          notes=""
+          if [ -f release-notes.md ] && [ -s release-notes.md ]; then
+            notes=$(cat release-notes.md)
+            echo "更新说明来自 release-notes.md（$(wc -l < release-notes.md) 行）"
+          elif [ -n "${INPUT_NOTES:-}" ]; then
+            notes=$(printf '%b' "$INPUT_NOTES")
+            echo "更新说明来自输入框"
+          fi
+
+          {
+            printf '**红果剧场 %s**（内部版本 %s）\n\n' "$NAME" "$CODE"
+            printf '<!-- SRC_COMMIT %s -->\n' "$GITHUB_SHA"
+            printf '<!-- NOTES_START -->\n'
+            if [ -n "$notes" ]; then
+              printf '%s\n' "$notes"
+            else
+              printf '本次发布未填写更新说明。\n'
+            fi
+            printf '<!-- NOTES_END -->\n\n'
+            printf '本版本同时发布 32 位与 64 位两个安装包，按设备处理器选择其一即可。\n'
+            printf '\n---\n\n'
+            printf '### 处理器对应\n\n'
+            printf '| 安装包 | 处理器架构 | 适用设备 |\n'
+            printf '| --- | --- | --- |\n'
+            printf '| `RedGuo-%s-v7a.apk` | armeabi-v7a（32 位 ARM） | 老款手机、低配电视盒子、32 位安卓系统 |\n' "$NAME"
+            printf '| `RedGuo-%s-v8a.apk` | arm64-v8a（64 位 ARM） | 近几年的手机与电视，64 位安卓系统 |\n' "$NAME"
+            printf '\n下载后可对照 `SHA256SUMS` 校验文件完整性。\n'
+            printf '\n构建时间：%s\n' "$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      # ---------- 更新清单 ----------
+      # update.json 会作为 Release 附件：客户端从发布接口找到它，再按设备架构取地址。
+      - name: 生成更新清单
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+
+          name, code, tag = os.environ['NAME'], os.environ['CODE'], os.environ['TAG']
+          repo = os.environ['GH_RELEASE_REPO']
+          gitcode = '%s/%s' % (os.environ['GITCODE_OWNER'], os.environ['GITCODE_REPO'])
+          dist = pathlib.Path('dist/android')
+
+          body = (pathlib.Path(os.environ['RUNNER_TEMP']) / 'notes.md').read_text(encoding='utf-8')
+          found = re.search(r'<!-- NOTES_START -->(.*?)<!-- NOTES_END -->', body, re.S)
+          notes = found.group(1).strip() if found else ''
+
+          def apk(abi, suffix):
+              fn = 'RedGuo-%s-%s.apk' % (name, suffix)
+              path = dist / fn
+              if not path.exists():
+                  raise SystemExit('缺少产物 %s' % fn)
+              url = 'https://github.com/%s/releases/download/%s/%s' % (repo, tag, fn)
+              return {
+                  'abi': abi,
+                  'name': fn,
+                  'size': path.stat().st_size,
+                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                  'url': url,
+                  'mirrors': [
+                      'https://gitcode.com/%s/releases/download/%s/%s' % (gitcode, tag, fn),
+                      'https://gh-proxy.com/%s' % url,
+                      'https://ghfast.top/%s' % url,
+                  ],
+              }
+
+          manifest = {
+              'schema': 1,
+              'packageName': os.environ['PACKAGE_NAME'],
+              'version': '%s+%s' % (name, code),
+              'versionCode': int(code),
+              'versionName': name,
+              'tag': tag,
+              'sourceCommit': os.environ['GITHUB_SHA'],
+              'notes': notes,
+              'apks': [apk('armeabi-v7a', 'v7a'), apk('arm64-v8a', 'v8a')],
+          }
+          (dist / 'update.json').write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print((dist / 'update.json').read_text(encoding='utf-8'))
+          PY
+
+      # ---------- 发布到 GitHub: AppDownload ----------
+      - name: 发布到 AppDownload
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.APPDOWNLOAD_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::缺少 APPDOWNLOAD_TOKEN，无法发布到 ${GH_RELEASE_REPO}"
+            exit 1
+          fi
+          gh release create "$TAG" \
+            dist/android/*.apk dist/android/SHA256SUMS dist/android/update.json \
+            --repo "$GH_RELEASE_REPO" \
+            --title "红果剧场正式版 ${NAME}" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          echo "已发布：https://github.com/${GH_RELEASE_REPO}/releases/tag/${TAG}"
+
+      - name: 输出摘要
+        if: always()
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "## 安卓正式版构建结果"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 版本名 | ${NAME} |"
+            echo "| 内部版本号 | ${CODE} |"
+            echo "| tag | ${TAG} |"
+            echo "| 版本指定 | ${INPUT_VERSION:-未指定（自动 +0.0.1）} |"
+            echo "| 手动试跑 | ${{ inputs.dry_run }} |"
+            echo "| AppDownload | https://github.com/${GH_RELEASE_REPO}/releases/tag/${TAG} |"
+            echo "| GitCode | 由 AppDownload 自动同步 |"
+            echo ""
+            echo "### 产物"
+            echo '```'
+            ls -lh dist/android 2>/dev/null || echo "无产物"
+            echo '```'
+            if [ "${{ inputs.dry_run }}" != "true" ]; then
+              echo ""
+              echo "> **下一步（手动）**：到 AppDownload 仓库的 Actions 运行「发布同步到 GitCode 与更新清单」，tag 留空即可取到这一版。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

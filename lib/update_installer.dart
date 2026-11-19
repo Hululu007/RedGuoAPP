@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -10,58 +10,24 @@ import 'package:path_provider/path_provider.dart';
 import 'app_update.dart';
 import 'core_bridge.dart';
 import 'diary_service.dart';
+import 'update_channel.dart';
 
 const _channel = MethodChannel('duanju/device');
 const _userAgent = 'guoapp-updater';
 
-/// GitHub Release 地址里的仓库与标签；不是发布页时返回 null。
-({String owner, String repo, String tag})? releaseRef(Uri release) {
-  if (!release.hasScheme) return null;
-  final segments = release.pathSegments;
-  if (segments.length < 5 ||
-      segments[2] != 'releases' ||
-      segments[3] != 'tag') {
-    return null;
-  }
-  final owner = segments[0];
-  final repo = segments[1];
-  final tag = segments[4];
-  if (owner.isEmpty || repo.isEmpty || tag.isEmpty) return null;
-  return (owner: owner, repo: repo, tag: tag);
-}
-
-/// 从发布页 HTML 里挑出安装包地址，优先匹配当前设备的架构。
-Uri? apkUriIn(String html, {required Uri base, required String abi}) {
-  final links = <Uri>[];
-  for (final match in RegExp(
-    r'''href="([^"]+?\.apk)(?:\?[^"]*)?"''',
-    caseSensitive: false,
-  ).allMatches(html)) {
-    final raw = match.group(1);
-    if (raw == null) continue;
-    final uri = Uri.tryParse(raw);
-    if (uri == null) continue;
-    final absolute = uri.hasScheme ? uri : base.resolveUri(uri);
-    if (!links.contains(absolute)) links.add(absolute);
-  }
-  if (links.isEmpty) return null;
-  final suffix = '-$abi.apk'.toLowerCase();
-  for (final uri in links) {
-    if (uri.path.toLowerCase().endsWith(suffix)) return uri;
-  }
-  return links.length == 1 ? links.first : null;
-}
-
-/// 把版本号换算成安装包文件名里用的短版本（去掉构建号）。
-String shortVersion(String version) => version.split('+').first;
-
-/// 应用内更新：定位安装包、下载到缓存目录，再交给系统安装程序。
+/// 应用内更新：按清单里给的地址下载安装包，校验完整后交给系统安装程序。
 class UpdateDownload {
-  UpdateDownload({required this.update, required this.abi, this.proxy = ''});
+  UpdateDownload({
+    required this.update,
+    required this.abi,
+    this.proxy = '',
+    this.channel = UpdateChannel.auto,
+  });
 
   final AppUpdate update;
   final String abi;
   final String proxy;
+  final UpdateChannel channel;
 
   HttpClient? _client;
   bool _cancelled = false;
@@ -101,20 +67,17 @@ class UpdateDownload {
   static Future<String> proxyOf(AppRepository repository) async {
     try {
       final settings = await repository.resourceSettings();
-      if (settings.proxyMode != 'manual') return '';
-      final uri = Uri.tryParse(settings.proxyUrl.trim());
-      if (uri == null || uri.host.isEmpty) return '';
-      if (uri.scheme.isNotEmpty && uri.scheme != 'http') return '';
-      final port = uri.hasPort ? uri.port : 80;
-      return 'PROXY ${uri.host}:$port';
+      return proxyFrom(settings.proxyMode, settings.proxyUrl);
     } catch (_) {
       return '';
     }
   }
 
   Future<File> run({void Function()? onProgress}) async {
+    final apk = update.apkFor(abi);
+    if (apk == null) throw AppFailure('更新清单里没有可用的安装包');
     final client = _client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20)
+      ..connectionTimeout = const Duration(seconds: 12)
       ..userAgent = _userAgent;
     if (proxy.isNotEmpty) client.findProxy = (_) => proxy;
     try {
@@ -122,116 +85,100 @@ class UpdateDownload {
         path.join((await getTemporaryDirectory()).path, 'updates'),
       );
       if (!await directory.exists()) await directory.create(recursive: true);
-      final uri = location = await _locate(client);
-      DiaryService.add('[更新] 下载 ${update.version}：$uri');
-      final target = await _download(client, uri, directory, onProgress);
-      file = target;
-      DiaryService.add(
-        '[更新] 下载完成 ${update.version}，${(target.lengthSync() / 1048576).toStringAsFixed(1)} MB',
+      final errors = <String>[];
+      for (final url in _candidates(apk)) {
+        final uri = Uri.tryParse(url);
+        if (uri == null || uri.host.isEmpty) continue;
+        try {
+          location = uri;
+          DiaryService.add('[更新] 下载 ${update.version}：$uri');
+          final target = await _download(
+            client,
+            uri,
+            apk,
+            directory,
+            onProgress,
+          );
+          file = target;
+          DiaryService.add(
+            '[更新] 下载完成 ${update.version}，'
+            '${(target.lengthSync() / 1048576).toStringAsFixed(1)} MB',
+          );
+          return target;
+        } on UpdateCancelled {
+          rethrow;
+        } on Object catch (error) {
+          errors.add('${_host(url)}：${_reason(error)}');
+          received = 0;
+        }
+      }
+      throw AppFailure(
+        errors.isEmpty ? '没有可用的安装包地址' : '下载失败（${errors.join('；')}）',
       );
-      return target;
-    } catch (error) {
-      if (_cancelled) throw const UpdateCancelled();
-      rethrow;
     } finally {
       client.close(force: true);
       _client = null;
     }
   }
 
-  Future<Uri> _locate(HttpClient client) async {
-    final release = Uri.tryParse(update.url.trim());
-    if (release == null || release.host.isEmpty) {
-      throw AppFailure('更新地址无效');
+  /// 线路只影响尝试顺序：选了国内就先试 GitCode，选了代理就先试加速前缀。
+  List<String> _candidates(AppUpdateApk apk) {
+    final all = apk.candidates;
+    if (all.length < 2) return all;
+    final preferred = <String>[];
+    final rest = <String>[];
+    for (final url in all) {
+      (_preferred(url) ? preferred : rest).add(url);
     }
-    if (release.path.toLowerCase().endsWith('.apk')) return release;
-    final ref = releaseRef(release);
-    if (ref == null) throw AppFailure('这个更新地址不支持应用内下载');
+    return [...preferred, ...rest];
+  }
 
-    final names = <String>{
-      'guoapp-${update.version}-$abi.apk',
-      'guoapp-${shortVersion(update.version)}-$abi.apk',
+  bool _preferred(String url) {
+    final host = _host(url);
+    return switch (channel) {
+      // 自动线路同样国内优先，取不到再退直连与代理。
+      UpdateChannel.auto ||
+      UpdateChannel.domestic => host.endsWith('gitcode.com'),
+      UpdateChannel.proxy => _isMirror(host),
+      UpdateChannel.direct => host == 'github.com',
     };
-    for (final name in names) {
-      final uri = Uri.parse(
-        '${release.origin}/${ref.owner}/${ref.repo}/releases/download/'
-        '${Uri.encodeComponent(ref.tag)}/${Uri.encodeComponent(name)}',
-      );
-      if (await _probe(client, uri)) return uri;
-    }
-
-    for (final url in [
-      '${release.origin}/${ref.owner}/${ref.repo}/releases/expanded_assets/${ref.tag}',
-      '${release.origin}/${ref.owner}/${ref.repo}/releases/tag/${ref.tag}',
-    ]) {
-      final page = Uri.parse(url);
-      final html = await _read(client, page);
-      if (html == null) continue;
-      final uri = apkUriIn(html, base: page, abi: abi);
-      if (uri != null) return uri;
-    }
-    throw AppFailure('没有找到适用于当前设备的安装包');
   }
 
-  Future<bool> _probe(HttpClient client, Uri uri) async {
-    try {
-      final request = await client.headUrl(uri);
-      final response = await request.close();
-      await response.drain<void>();
-      return response.statusCode == HttpStatus.ok;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<String?> _read(HttpClient client, Uri uri) async {
-    try {
-      final request = await client.getUrl(uri);
-      request.headers.set(HttpHeaders.acceptHeader, 'text/html');
-      final response = await request.close();
-      if (response.statusCode != HttpStatus.ok) {
-        await response.drain<void>();
-        return null;
-      }
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-        if (bytes.length > 1 << 20) break;
-      }
-      return utf8.decode(bytes, allowMalformed: true);
-    } catch (_) {
-      return null;
-    }
-  }
+  static bool _isMirror(String host) =>
+      const {'gh-proxy.com', 'ghfast.top'}.contains(host);
 
   Future<File> _download(
     HttpClient client,
     Uri uri,
+    AppUpdateApk apk,
     Directory directory,
     void Function()? onProgress,
   ) async {
     final safe = update.version.replaceAll(RegExp(r'[^0-9A-Za-z._-]'), '-');
     final target = File(path.join(directory.path, 'update-$safe-$abi.apk'));
-    for (final stale in directory.listSync().whereType<File>()) {
-      if (stale.path == target.path) continue;
-      if (!stale.path.toLowerCase().endsWith('.apk')) continue;
-      await stale.delete().catchError((Object _) => stale);
-    }
+    final partial = File('${target.path}.part');
+    if (await target.exists()) await target.delete();
+    if (await partial.exists()) await partial.delete();
+
     final request = await client.getUrl(uri);
     request.headers.set(HttpHeaders.userAgentHeader, _userAgent);
     final response = await request.close();
     if (response.statusCode != HttpStatus.ok) {
       await response.drain<void>();
-      throw AppFailure('下载失败：HTTP ${response.statusCode}');
+      throw AppFailure('HTTP ${response.statusCode}');
     }
-    total = response.contentLength;
+    total = response.contentLength > 0 ? response.contentLength : apk.size;
     received = 0;
-    final sink = target.openWrite();
+    final sink = partial.openWrite();
     try {
-      await for (final chunk in response) {
+      // 事件间隔超时：连上了但一直不给数据也要能换源。
+      await for (final chunk in response.timeout(const Duration(seconds: 30))) {
         if (_cancelled) throw const UpdateCancelled();
         sink.add(chunk);
         received += chunk.length;
+        if (apk.size > 0 && received > apk.size) {
+          throw AppFailure('安装包长度异常');
+        }
         onProgress?.call();
       }
       await sink.flush();
@@ -239,14 +186,24 @@ class UpdateDownload {
       await sink.close();
     }
     if (_cancelled) throw const UpdateCancelled();
-    if (total > 0 && received != total) {
-      await target.delete().catchError((Object _) => target);
-      throw AppFailure('安装包下载不完整，请重试');
-    }
-    if (await target.length() <= 0) {
-      throw AppFailure('安装包内容为空，请重试');
-    }
+    await _verify(partial, apk);
+    await partial.rename(target.path);
     return target;
+  }
+
+  /// 长度和 SHA256 都要对上，避免装到半个包或别人的包。
+  Future<void> _verify(File file, AppUpdateApk apk) async {
+    if (apk.size > 0 && await file.length() != apk.size) {
+      await file.delete().catchError((Object _) => file);
+      throw AppFailure('安装包长度不匹配，请重试');
+    }
+    if (apk.sha256.length == 64) {
+      final digest = await sha256.bind(file.openRead()).first;
+      if ('$digest' != apk.sha256) {
+        await file.delete().catchError((Object _) => file);
+        throw AppFailure('安装包校验未通过，请重试');
+      }
+    }
   }
 
   /// 交出安装包，交给系统安装程序。
@@ -261,6 +218,14 @@ class UpdateDownload {
       throw AppFailure(error.message ?? '无法启动安装程序');
     }
   }
+
+  static String _host(String url) => Uri.tryParse(url)?.host ?? url;
+
+  static String _reason(Object error) => switch (error) {
+    AppFailure(:final message) => message,
+    TimeoutException() => '超时',
+    _ => '$error',
+  };
 }
 
 class UpdateCancelled implements Exception {

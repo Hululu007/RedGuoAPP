@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_update.dart';
 import '../core_bridge.dart';
 import '../local_store.dart';
+import '../update_channel.dart';
 import '../update_installer.dart';
 import 'app_scope.dart';
 import 'widgets/focus_ring.dart';
@@ -28,7 +29,7 @@ Future<void> runStartupChecks(BuildContext context, LocalStore store) async {
   try {
     current = await currentAppVersion();
     if (!store.checkUpdates) return;
-    final latest = await repository.checkUpdate(current);
+    final latest = await repository.checkUpdate();
     if (latest == null) return;
     update = latest;
   } catch (_) {
@@ -42,13 +43,15 @@ Future<void> runStartupChecks(BuildContext context, LocalStore store) async {
     case _UpdateChoice.skip:
       await store.setIgnoredUpdate(update.version);
     case _UpdateChoice.download:
-      if (context.mounted) await _applyUpdate(context, repository, update);
+      if (context.mounted) {
+        await _applyUpdate(context, repository, update, store);
+      }
     case _UpdateChoice.dismiss || null:
       return;
   }
 }
 
-Future<void> checkUpdateManually(BuildContext context) async {
+Future<void> checkUpdateManually(BuildContext context, LocalStore store) async {
   final repository = AppScope.of(context).repository;
   final messenger = ScaffoldMessenger.of(context);
   final String current;
@@ -59,7 +62,7 @@ Future<void> checkUpdateManually(BuildContext context) async {
     if (last != null && DateTime.now().difference(last) < _manualCooldown) {
       update = _lastManualUpdate;
     } else {
-      update = await repository.checkUpdate(current);
+      update = await repository.checkUpdate();
       _lastManualCheck = DateTime.now();
       _lastManualUpdate = update;
     }
@@ -80,7 +83,7 @@ Future<void> checkUpdateManually(BuildContext context) async {
   if (!context.mounted) return;
   final choice = await _askUpdate(context, current, update, manual: true);
   if (choice == _UpdateChoice.download && context.mounted) {
-    await _applyUpdate(context, repository, update);
+    await _applyUpdate(context, repository, update, store);
   }
 }
 
@@ -94,8 +97,30 @@ Future<_UpdateChoice?> _askUpdate(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: Text('发现新版本 ${update.version}'),
-      content: Text(
-        manual ? '当前版本 $current。' : '当前版本 $current。选「不再提醒」后可在设置 › 关于中重新打开检查更新。',
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            manual
+                ? '当前版本 $current。'
+                : '当前版本 $current。选「不再提醒」后可在设置 › 关于中重新打开检查更新。',
+          ),
+          if (update.notes.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 180),
+              child: Scrollbar(
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    update.notes,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
       actions: [
         for (final (choice, label) in [
@@ -129,13 +154,21 @@ Future<void> _applyUpdate(
   BuildContext context,
   AppRepository repository,
   AppUpdate update,
+  LocalStore store,
 ) async {
-  if (!Platform.isAndroid) return _openRelease(context, update.url);
+  if (!Platform.isAndroid) {
+    final channel = parseUpdateChannel(store.updateChannel);
+    return _openRelease(context, releaseUrlOf(update, channel));
+  }
+  final channel = parseUpdateChannel(store.updateChannel);
   final file = await showDialog<File>(
     context: context,
     barrierDismissible: false,
-    builder: (_) =>
-        _UpdateDownloadDialog(repository: repository, update: update),
+    builder: (_) => _UpdateDownloadDialog(
+      repository: repository,
+      update: update,
+      channel: channel,
+    ),
   );
   if (file == null || !context.mounted) return;
   await _installPackage(context, file);
@@ -186,10 +219,15 @@ Future<void> _openRelease(BuildContext context, String url) async {
 }
 
 class _UpdateDownloadDialog extends StatefulWidget {
-  const _UpdateDownloadDialog({required this.repository, required this.update});
+  const _UpdateDownloadDialog({
+    required this.repository,
+    required this.update,
+    required this.channel,
+  });
 
   final AppRepository repository;
   final AppUpdate update;
+  final UpdateChannel channel;
 
   @override
   State<_UpdateDownloadDialog> createState() => _UpdateDownloadDialogState();
@@ -197,6 +235,7 @@ class _UpdateDownloadDialog extends StatefulWidget {
 
 class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   UpdateDownload? _download;
+  String _abi = '';
   String _stage = '正在查找安装包';
   String? _error;
   double _progress = 0;
@@ -211,12 +250,13 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   Future<void> _start() async {
     try {
       final proxy = await UpdateDownload.proxyOf(widget.repository);
-      final abi = await UpdateDownload.deviceAbi();
+      final abi = _abi = await UpdateDownload.deviceAbi();
       if (!mounted) return;
       final download = _download = UpdateDownload(
         update: widget.update,
         abi: abi,
         proxy: proxy,
+        channel: widget.channel,
       );
       final file = await download.run(
         onProgress: () {
@@ -249,7 +289,9 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   }
 
   Future<void> _fallback() async {
-    final url = widget.update.url;
+    final url =
+        directApkUrlOf(widget.update, _abi, widget.channel) ??
+        releaseUrlOf(widget.update, widget.channel);
     Navigator.pop(context);
     final opened = await launchUrl(
       Uri.parse(url),
