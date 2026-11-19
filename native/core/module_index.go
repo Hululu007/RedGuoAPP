@@ -68,22 +68,11 @@ func validModuleIndexPath(path string) bool {
 	return true
 }
 
-// usable 判断索引条目能否进商店。精简索引（index.json）不带 tag 与 sha256，
-// 只给出 repo/path/version，因此这两项按可选处理：缺省时从 main 分支拉取，
-// 由 manifest 的 id/version 兜底校验；一旦声明就必须完整，避免半套哈希。
 func (entry moduleIndexEntry) usable() bool {
-	if entry.API != moduleAPIVersion || !moduleIDPattern.MatchString(entry.ID) || strings.TrimSpace(entry.Name) == "" ||
-		!moduleIndexRepo.MatchString(entry.Repo) || !validModuleIndexPath(entry.Path) {
-		return false
-	}
-	if entry.Tag != "" && !moduleIndexTag.MatchString(entry.Tag) {
-		return false
-	}
-	manifestHash, codeHash := entry.SHA256[moduleManifest], entry.SHA256[moduleEntry]
-	if manifestHash == "" && codeHash == "" {
-		return true
-	}
-	return moduleIndexHash.MatchString(manifestHash) && moduleIndexHash.MatchString(codeHash)
+	return entry.API == moduleAPIVersion && moduleIDPattern.MatchString(entry.ID) && strings.TrimSpace(entry.Name) != "" &&
+		moduleIndexRepo.MatchString(entry.Repo) && moduleIndexTag.MatchString(entry.Tag) &&
+		validModuleIndexPath(entry.Path) &&
+		moduleIndexHash.MatchString(entry.SHA256[moduleManifest]) && moduleIndexHash.MatchString(entry.SHA256[moduleEntry])
 }
 
 func parseModuleIndex(raw []byte) ([]moduleIndexEntry, error) {
@@ -224,31 +213,9 @@ func (engine *nativeEngine) indexedModulePackage(ctx context.Context, id string,
 		if err != nil {
 			return nil, err
 		}
-		if err := verifyModulePayload(entry, manifest); err != nil {
-			return nil, err
-		}
 		return zipModuleFiles(manifest, code)
 	}
 	return nil, fmt.Errorf("模块索引里没有 %s", id)
-}
-
-// verifyModulePayload 是精简索引的兜底校验：索引没给 sha256 时，至少确认
-// 清单自称同一个模块、版本与索引一致，避免拉到别的版本或别的站源的文件。
-func verifyModulePayload(entry moduleIndexEntry, manifest []byte) error {
-	var meta struct {
-		ID      string `json:"id"`
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(manifest, &meta); err != nil {
-		return fmt.Errorf("模块 %s 的清单无法解析", entry.Name)
-	}
-	if meta.ID != entry.ID {
-		return fmt.Errorf("模块清单 id 不符：索引 %s，实际是模块 %s", entry.ID, meta.ID)
-	}
-	if entry.Version != "" && meta.Version != "" && meta.Version != entry.Version {
-		return fmt.Errorf("模块 %s 版本不符：索引 %s，实际 %s", entry.Name, entry.Version, meta.Version)
-	}
-	return nil
 }
 
 func (engine *nativeEngine) fetchIndexedFile(ctx context.Context, entry moduleIndexEntry, mirror int, name string, limit int) ([]byte, error) {
@@ -261,16 +228,11 @@ func (engine *nativeEngine) fetchIndexedFile(ctx context.Context, entry moduleIn
 		pattern := moduleFileAddresses[(mirror+offset)%len(moduleFileAddresses)]
 		data, err := engine.fetchModuleResource(ctx, fmt.Sprintf(pattern, entry.Repo, relative+name), limit)
 		if err == nil {
-			// 精简索引不带 sha256，声明了才校验；没有时由 verifyModulePayload 兜底。
-			if expected := entry.SHA256[name]; expected != "" {
-				sum := sha256.Sum256(data)
-				if hex.EncodeToString(sum[:]) != expected {
-					err = errors.New("文件校验不符")
-				}
-			}
-			if err == nil {
+			sum := sha256.Sum256(data)
+			if hex.EncodeToString(sum[:]) == entry.SHA256[name] {
 				return data, nil
 			}
+			err = errors.New("文件校验不符")
 		}
 		failures = append(failures, err.Error())
 	}
