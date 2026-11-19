@@ -48,9 +48,7 @@ desktop.ini
 
 /native/core/bundled/*
 !/native/core/bundled/.gitkeep
-# 模块源目录：只提交内置模块本体，构建时会复制到 native/core/bundled/
-/bundled-modules/*
-!/bundled-modules/hongguo/
-!/bundled-modules/hongguo/**
+# 模块副本由 scripts/fetch_module.py 在构建时从 RedGuoAPI 拉取，不入库
+/bundled-modules/
 # Widget Preview related
 .widget_preview/

@@ -27,9 +27,16 @@ flutter = shutil.which('flutter')
 if not flutter:
     raise SystemExit('请先将 Flutter SDK 的 bin 目录加入 PATH。')
 abi_args = [item for abi in options.abi or [] for item in ['--abi', abi]]
-# 内置站源：目录里有 manifest.json 和 main.js 就随包打进去，装完即有红果源。
-bundle_dir = root / 'bundled-modules' / 'hongguo'
-bundle_args = ['--bundle', str(bundle_dir)] if (bundle_dir / 'main.js').is_file() else []
+# 内置站源：构建前从 RedGuoAPI 精简包（index.json + modules/）拉全部模块，
+# 按索引版本校验后写入 bundled-modules/。拉不到时沿用本地已有副本，避免网络抖动把整次构建带崩。
+subprocess.run([sys.executable, str(root / 'scripts' / 'fetch_module.py'), '--offline-ok'],
+               cwd=root, env=env, check=True)
+# 精简包里的模块全部内置，hongguo 排第一；没拉到任何模块时跳过 --bundle。
+bundle_root = root / 'bundled-modules'
+bundle_dirs = sorted(
+    (path.parent for path in bundle_root.glob('*/main.js') if path.is_file()),
+    key=lambda path: (path.name != 'hongguo', path.name)) if bundle_root.is_dir() else []
+bundle_args = [item for path in bundle_dirs for item in ('--bundle', str(path))]
 subprocess.run([sys.executable, str(root / 'scripts' / 'build_native.py'), '--platform', 'android', *abi_args, *bundle_args],
                cwd=root, env=env, check=True)
 subprocess.run([flutter, 'pub', 'get'], cwd=root, env=env, check=True)
