@@ -388,27 +388,6 @@ jobs:
             --notes-file "$RUNNER_TEMP/notes.md"
           echo "已发布：https://github.com/${GH_RELEASE_REPO}/releases/tag/${TAG}"
 
-      # ---------- 自动触发 GitCode 同步 ----------
-      # 同步任务在 AppDownload 仓库里跑，跨仓库只能靠 workflow_dispatch 远程触发。
-      # 失败不阻塞发布：Release 已经在 GitHub 上了，人工补跑即可。
-      - name: 触发 GitCode 同步
-        if: ${{ !inputs.dry_run }}
-        env:
-          GH_TOKEN: ${{ secrets.APPDOWNLOAD_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::缺少 APPDOWNLOAD_TOKEN，跳过自动同步"
-            exit 0
-          fi
-          if gh workflow run sync-gitcode.yml \
-               --repo "$GH_RELEASE_REPO" --ref main -f "tag=$TAG"; then
-            echo "已触发同步：https://github.com/${GH_RELEASE_REPO}/actions/workflows/sync-gitcode.yml"
-          else
-            echo "::warning::自动同步未触发（检查 APPDOWNLOAD_TOKEN 是否有 actions 权限），可到 ${GH_RELEASE_REPO} 的 Actions 手动运行 sync-gitcode.yml"
-          fi
-
       - name: 输出摘要
         if: always()
         env:
@@ -436,7 +415,7 @@ jobs:
             echo '```'
             if [ "${{ inputs.dry_run }}" != "true" ]; then
               echo ""
-              echo "> **GitCode 同步已自动触发**，进度见 [AppDownload Actions](https://github.com/${GH_RELEASE_REPO}/actions/workflows/sync-gitcode.yml)。"
+              echo "> AppDownload 收到本次 Release 后会自动运行 GitCode 同步，进度见 [AppDownload Actions](https://github.com/${GH_RELEASE_REPO}/actions/workflows/sync-gitcode.yml)。"
               echo "> 同步失败时可在该页面点 Run workflow，`tag` 填 \`${TAG}\` 补跑一次。"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
