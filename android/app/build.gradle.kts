@@ -7,9 +7,6 @@ plugins {
 
 val appPackageName = System.getenv("PACKAGE_NAME")?.trim()?.takeIf { it.isNotEmpty() } ?: "com.x.redguoapp"
 
-/// 只打一个架构：scripts/build_android.py 会为每个 ABI 单独调用一次。
-val onlyAbi = System.getenv("ONLY_ABI")?.trim().orEmpty()
-
 val releaseKey = rootProject.file("key.properties")
 val releaseProperties = Properties()
 if (releaseKey.exists()) {
@@ -71,16 +68,6 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            // 单 ABI 构建：只保留目标架构的 so，其余全部排除。
-            // 配合不含 --split-per-abi 的构建，versionCode 才不会被 AGP 加偏移。
-            if (onlyAbi.isNotEmpty()) {
-                excludes += listOf(
-                    "lib/armeabi-v7a/**",
-                    "lib/arm64-v8a/**",
-                    "lib/x86/**",
-                    "lib/x86_64/**",
-                ).filterNot { it.startsWith("lib/$onlyAbi/") }
-            }
         }
     }
 }

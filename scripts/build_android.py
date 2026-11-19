@@ -31,19 +31,15 @@ subprocess.run([sys.executable, str(root / 'scripts' / 'build_native.py'), '--pl
                cwd=root, env=env, check=True)
 subprocess.run([flutter, 'pub', 'get'], cwd=root, env=env, check=True)
 
-# 不用 --split-per-abi：AGP 会给每个 ABI 拆分包按序号加 1000 的 versionCode
-# 偏移（实测 +2000/+3000），客户端拿清单里的基准值比较就永远判成「已是最新」。
-# 改成每个架构单独构建一次，靠 ONLY_ABI 裁掉其余架构的 so，版本号才是精确值，
-# 包体也和拆分包一样小。
+# --split-per-abi 一次构建同时出两个包。Flutter 默认会给每个 ABI 的
+# versionCode 加偏移（+1000 × ABI序号，见 FlutterPlugin.kt 的 versionCodeOverride），
+# 让设备读到的内部号与清单里的基准值对不上。android/gradle.properties 里的
+# force-version-code-ignoring-abi=true 关掉了这个覆盖，两个包都等于设定值。
 targets = {'arm64-v8a': 'android-arm64', 'armeabi-v7a': 'android-arm', 'x86_64': 'android-x64'}
-apk_dir = root / 'build' / 'app' / 'outputs' / 'flutter-apk'
-for abi in options.abi or ['arm64-v8a', 'armeabi-v7a']:
-    build_env = dict(env, ONLY_ABI=abi)
-    subprocess.run(
-        [flutter, 'build', 'apk', '--release', '--no-pub',
-         f'--target-platform={targets[abi]}', *app.flutter_arguments],
-        cwd=root, env=build_env, check=True)
-    # package_release.py 按 app-<abi>-release.apk 找产物，这里对齐成同样的名字。
-    shutil.copy2(apk_dir / 'app-release.apk', apk_dir / f'app-{abi}-release.apk')
+abis = options.abi or ['arm64-v8a', 'armeabi-v7a']
+subprocess.run(
+    [flutter, 'build', 'apk', '--release', '--split-per-abi', '--no-pub',
+     '--target-platform', ','.join(targets[abi] for abi in abis), *app.flutter_arguments],
+    cwd=root, env=env, check=True)
 subprocess.run([sys.executable, str(root / 'scripts' / 'package_release.py'), '--platform', 'android', *abi_args],
                cwd=root, env=env, check=True)
