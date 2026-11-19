@@ -39,8 +39,6 @@ env:
   # 发布目标
   GH_RELEASE_REPO: xycvip/AppDownload
   TAG_PREFIX: redguo-
-  GITCODE_OWNER: xycvip
-  GITCODE_REPO: redguo
 
 jobs:
   android:
@@ -306,65 +304,8 @@ jobs:
             printf '| `RedGuo-%s-v7a.apk` | armeabi-v7a（32 位 ARM） | 老款手机、低配电视盒子、32 位安卓系统 |\n' "$NAME"
             printf '| `RedGuo-%s-v8a.apk` | arm64-v8a（64 位 ARM） | 近几年的手机与电视，64 位安卓系统 |\n' "$NAME"
             printf '\n下载后可对照 `SHA256SUMS` 校验文件完整性。\n'
-            printf '\n构建时间：%s\n' "$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
           } > "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
-
-      # ---------- 更新清单 ----------
-      # update.json 会作为 Release 附件：客户端从发布接口找到它，再按设备架构取地址。
-      - name: 生成更新清单
-        env:
-          NAME: ${{ steps.ver.outputs.name }}
-          CODE: ${{ steps.ver.outputs.code }}
-          TAG: ${{ steps.ver.outputs.tag }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib, re
-
-          name, code, tag = os.environ['NAME'], os.environ['CODE'], os.environ['TAG']
-          repo = os.environ['GH_RELEASE_REPO']
-          gitcode = '%s/%s' % (os.environ['GITCODE_OWNER'], os.environ['GITCODE_REPO'])
-          dist = pathlib.Path('dist/android')
-
-          body = (pathlib.Path(os.environ['RUNNER_TEMP']) / 'notes.md').read_text(encoding='utf-8')
-          found = re.search(r'<!-- NOTES_START -->(.*?)<!-- NOTES_END -->', body, re.S)
-          notes = found.group(1).strip() if found else ''
-
-          def apk(abi, suffix):
-              fn = 'RedGuo-%s-%s.apk' % (name, suffix)
-              path = dist / fn
-              if not path.exists():
-                  raise SystemExit('缺少产物 %s' % fn)
-              url = 'https://github.com/%s/releases/download/%s/%s' % (repo, tag, fn)
-              return {
-                  'abi': abi,
-                  'name': fn,
-                  'size': path.stat().st_size,
-                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-                  'url': url,
-                  'mirrors': [
-                      'https://gitcode.com/%s/releases/download/%s/%s' % (gitcode, tag, fn),
-                      'https://gh-proxy.com/%s' % url,
-                      'https://ghfast.top/%s' % url,
-                  ],
-              }
-
-          manifest = {
-              'schema': 1,
-              'packageName': os.environ['PACKAGE_NAME'],
-              'version': '%s+%s' % (name, code),
-              'versionCode': int(code),
-              'versionName': name,
-              'tag': tag,
-              'sourceCommit': os.environ['GITHUB_SHA'],
-              'notes': notes,
-              'apks': [apk('armeabi-v7a', 'v7a'), apk('arm64-v8a', 'v8a')],
-          }
-          (dist / 'update.json').write_text(
-              json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          print((dist / 'update.json').read_text(encoding='utf-8'))
-          PY
 
       # ---------- 发布到 GitHub: AppDownload ----------
       - name: 发布到 AppDownload
@@ -381,11 +322,32 @@ jobs:
             exit 1
           fi
           gh release create "$TAG" \
-            dist/android/*.apk dist/android/SHA256SUMS dist/android/update.json \
+            dist/android/*.apk dist/android/SHA256SUMS \
             --repo "$GH_RELEASE_REPO" \
             --title "红果剧场正式版 ${NAME}" \
             --notes-file "$RUNNER_TEMP/notes.md"
           echo "已发布：https://github.com/${GH_RELEASE_REPO}/releases/tag/${TAG}"
+
+      # ---------- 自动触发 GitCode 同步 ----------
+      # 同步任务在 AppDownload 仓库里跑，跨仓库只能靠 workflow_dispatch 远程触发。
+      # 失败不阻塞发布：Release 已经在 GitHub 上了，人工补跑即可。
+      - name: 触发 GitCode 同步
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.APPDOWNLOAD_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::缺少 APPDOWNLOAD_TOKEN，跳过自动同步"
+            exit 0
+          fi
+          if gh workflow run sync-gitcode.yml \
+               --repo "$GH_RELEASE_REPO" --ref main -f "tag=$TAG"; then
+            echo "已触发同步：https://github.com/${GH_RELEASE_REPO}/actions/workflows/sync-gitcode.yml"
+          else
+            echo "::warning::自动同步未触发（检查 APPDOWNLOAD_TOKEN 是否有 actions 权限），可到 ${GH_RELEASE_REPO} 的 Actions 手动运行 sync-gitcode.yml"
+          fi
 
       - name: 输出摘要
         if: always()
@@ -414,6 +376,7 @@ jobs:
             echo '```'
             if [ "${{ inputs.dry_run }}" != "true" ]; then
               echo ""
-              echo "> **下一步（手动）**：到 AppDownload 仓库的 Actions 运行「发布同步到 GitCode 与更新清单」，tag 留空即可取到这一版。"
+              echo "> **GitCode 同步已自动触发**，进度见 [AppDownload Actions](https://github.com/${GH_RELEASE_REPO}/actions/workflows/sync-gitcode.yml)。"
+              echo "> 同步失败时可在该页面点 Run workflow，`tag` 填 \`${TAG}\` 补跑一次。"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
