@@ -27,7 +27,10 @@ flutter = shutil.which('flutter')
 if not flutter:
     raise SystemExit('请先将 Flutter SDK 的 bin 目录加入 PATH。')
 abi_args = [item for abi in options.abi or [] for item in ['--abi', abi]]
-subprocess.run([sys.executable, str(root / 'scripts' / 'build_native.py'), '--platform', 'android', *abi_args],
+# 内置站源：目录里有 manifest.json 和 main.js 就随包打进去，装完即有红果源。
+bundle_dir = root / 'bundled-modules' / 'hongguo'
+bundle_args = ['--bundle', str(bundle_dir)] if (bundle_dir / 'main.js').is_file() else []
+subprocess.run([sys.executable, str(root / 'scripts' / 'build_native.py'), '--platform', 'android', *abi_args, *bundle_args],
                cwd=root, env=env, check=True)
 subprocess.run([flutter, 'pub', 'get'], cwd=root, env=env, check=True)
 

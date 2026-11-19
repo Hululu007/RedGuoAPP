@@ -48,6 +48,9 @@ desktop.ini
 
 /native/core/bundled/*
 !/native/core/bundled/.gitkeep
-/bundled-modules/
+# 模块源目录：只提交内置模块本体，构建时会复制到 native/core/bundled/
+/bundled-modules/*
+!/bundled-modules/hongguo/
+!/bundled-modules/hongguo/**
 # Widget Preview related
 .widget_preview/
