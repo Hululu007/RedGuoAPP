@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:duanju_app/core_bridge.dart';
 import 'package:duanju_app/local_store.dart';
 import 'package:duanju_app/models.dart';
+import 'package:duanju_app/playback_engine.dart';
 import 'package:duanju_app/playback_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
@@ -77,8 +79,8 @@ Future<(PlaybackSession, FakePlayer)> _open(
     repository: repository,
     store: store,
     detail: dramaDetail(_show, count: 3),
-    player: player,
-    standby: standby,
+    player: EnginePlayer.wrap(player),
+    standby: standby == null ? null : EnginePlayer.wrap(standby),
     index: index,
     position: position,
     autoplay: autoplay,
@@ -361,7 +363,7 @@ void main() {
 
     expect(repository.preloaded, [2]);
     expect(session.standbyIndex, 1);
-    expect(identical(session.standby, standby), isTrue);
+    expect(identical(session.standby?.mpvPlayer, standby), isTrue);
     expect(standby.opened.single.uri, 'https://media.test/2.m3u8');
     expect(standby.state.playing, isFalse);
 
@@ -369,7 +371,7 @@ void main() {
     await pumpEventQueue();
 
     expect(session.index, 1);
-    expect(identical(session.player, standby), isTrue);
+    expect(identical(session.player.mpvPlayer, standby), isTrue);
     expect(standby.state.playing, isTrue);
     expect(standby.opened, hasLength(1));
     expect(repository.resolved, hasLength(1));
@@ -387,7 +389,7 @@ void main() {
 
     await session.play(2);
 
-    expect(identical(session.player, player), isTrue);
+    expect(identical(session.player.mpvPlayer, player), isTrue);
     expect(session.standbyIndex, -1);
     expect(standby.stops, greaterThan(0));
     expect(repository.released, contains('session-2'));
@@ -494,12 +496,45 @@ void main() {
 
     final switching = session.play(1);
 
-    expect(identical(session.player, standby), isTrue);
+    expect(identical(session.player.mpvPlayer, standby), isTrue);
     expect(session.ready, isTrue);
     expect(session.paused, isFalse);
     await switching;
     expect(standby.state.playing, isTrue);
     expect(store.watched(_show.id)!.episode, 1);
+  });
+
+  test('Exo 更早准备下一集，MPV 保持原阈值', () {
+    expect(preloadLeadFor(exo: false, durationMs: 100000), 45000);
+    expect(preloadLeadFor(exo: true, durationMs: 100000), 50000);
+    expect(preloadLeadFor(exo: true, durationMs: 60000), 45000);
+    expect(preloadLeadFor(exo: true, durationMs: 600000), 90000);
+    expect(preloadLeadFor(exo: true, durationMs: 0), 45000);
+  });
+
+  test('切集时等仍在打开的下一集，不再重新取地址', () async {
+    final repository = _PlaybackRepository();
+    final store = await openStore();
+    final standby = FakePlayer();
+    final gate = Completer<void>();
+    standby.openGate = gate;
+    final (session, player) = await _open(repository, store, standby: standby);
+    await _settle(player);
+
+    expect(session.standbyIndex, -1);
+    expect(standby.opened, hasLength(1));
+
+    final switching = session.play(1);
+    await pumpEventQueue();
+    expect(identical(session.player.mpvPlayer, player), isTrue);
+
+    gate.complete();
+    await switching;
+
+    expect(identical(session.player.mpvPlayer, standby), isTrue);
+    expect(standby.state.playing, isTrue);
+    expect(repository.resolved, hasLength(1));
+    expect(repository.preloaded, [2]);
   });
 
   test('only buffering that lasts counts as stalled', () async {
@@ -519,4 +554,43 @@ void main() {
     player.buffer(false);
     expect(session.stalled, isFalse);
   });
+
+  test('播放意图在打开过程中生效，打开完成后自动开始播放', () async {
+    final store = await openStore();
+    final player = _SlowPlayer();
+    final session = PlaybackSession(
+      repository: _PlaybackRepository(),
+      store: store,
+      detail: dramaDetail(_show, count: 3),
+      player: EnginePlayer.wrap(player),
+      index: 0,
+      position: 0,
+      autoplay: false,
+    );
+    addTearDown(() {
+      if (_closed.add(session)) session.dispose();
+    });
+    await pumpEventQueue();
+    expect(player.state.playing, isFalse, reason: '预打开应保持暂停');
+
+    // 打开还没结束用户就点了播放：此时 ready 仍为 false，播放按钮不会生效。
+    session.start(0);
+    await pumpEventQueue();
+    expect(player.state.playing, isFalse);
+
+    player.gate.complete();
+    await pumpEventQueue();
+    expect(player.state.playing, isTrue, reason: '打开完成后应补上播放');
+  });
+}
+
+/// 打开过程可被挂起的播放器，用于复现「初始化未完成时点了播放」。
+class _SlowPlayer extends FakePlayer {
+  final gate = Completer<void>();
+
+  @override
+  Future<void> open(Playable playable, {bool play = true}) async {
+    await gate.future;
+    await super.open(playable, play: play);
+  }
 }

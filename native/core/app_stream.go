@@ -189,6 +189,17 @@ func (stream *nativeStreamServer) nativeRelease(token string) {
 	stream.mu.Unlock()
 }
 
+func (stream *nativeStreamServer) nativeEnableDecrypt(token string, key []byte) error {
+	stream.mu.Lock()
+	session := stream.sessions[token]
+	stream.mu.Unlock()
+	if session == nil {
+		return errors.New("播放已结束")
+	}
+	session.cencKey = key
+	return nil
+}
+
 func (stream *nativeStreamServer) nativeAsset(token string, session *nativeStreamSession, asset nativeStreamAsset) string {
 	digest := sha256.Sum256([]byte(asset.address + "\x00" + asset.contentType))
 	extension := ".ts"

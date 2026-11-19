@@ -3,12 +3,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../../app_device.dart';
 import '../../local_store.dart';
 import '../../models.dart';
 import '../../playback_preferences.dart';
+import '../../playback_engine.dart';
 import '../../playback_session.dart';
 import '../app_scope.dart';
 import '../detail/season_strip.dart';
@@ -63,7 +63,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     _Panel.quality: LayerLink(),
     _Panel.fit: LayerLink(),
   };
-  Player? _bound;
+  EnginePlayer? _bound;
   Timer? _hideTimer;
   Timer? _tapTimer;
   Timer? _streakTimer;

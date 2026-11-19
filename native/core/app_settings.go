@@ -16,6 +16,7 @@ import (
 type nativeResourceSettings struct {
 	ProxyMode           string `json:"proxyMode"`
 	ProxyURL            string `json:"proxyUrl"`
+	DNSProvider         string `json:"dnsProvider"`
 	CatalogConcurrency  int    `json:"catalogConcurrency"`
 	DownloadConcurrency int    `json:"downloadConcurrency"`
 	DownloadBySource    bool   `json:"downloadBySource"`
@@ -24,13 +25,18 @@ type nativeResourceSettings struct {
 }
 
 func defaultResourceSettings() nativeResourceSettings {
-	return nativeResourceSettings{ProxyMode: "auto", CatalogConcurrency: 3, DownloadConcurrency: 2}
+	return nativeResourceSettings{ProxyMode: "auto", DNSProvider: "tencent", CatalogConcurrency: 3, DownloadConcurrency: 2}
 }
 
 func (settings nativeResourceSettings) validate() error {
 	if settings.CatalogConcurrency < 1 || settings.CatalogConcurrency > 6 ||
 		settings.DownloadConcurrency < 1 || settings.DownloadConcurrency > 6 {
 		return errors.New("并发应为 1 至 6")
+	}
+	switch settings.DNSProvider {
+	case "", "system", "tencent", "ali", "google":
+	default:
+		return errors.New("DNS 服务商无效")
 	}
 	if settings.ProxyMode != "auto" && settings.ProxyMode != "direct" && settings.ProxyMode != "manual" {
 		return errors.New("代理模式无效")
@@ -89,8 +95,15 @@ func (engine *nativeEngine) loadResourceSettings() {
 	if err == nil {
 		var stored nativeResourceSettings
 		if info.Mode().IsRegular() && info.Size() <= 16384 {
-			if data, readErr := os.ReadFile(file); readErr == nil && json.Unmarshal(data, &stored) == nil && stored.validate() == nil {
-				settings = stored
+			if data, readErr := os.ReadFile(file); readErr == nil && json.Unmarshal(data, &stored) == nil {
+				if stored.DNSProvider == "" {
+					stored.DNSProvider = "tencent"
+				}
+				if stored.validate() == nil {
+					settings = stored
+				} else {
+					settings.Warning = "网络与下载设置无法读取，已使用默认值，请重新保存设置"
+				}
 			} else {
 				settings.Warning = "网络与下载设置无法读取，已使用默认值，请重新保存设置"
 			}
@@ -129,6 +142,9 @@ func (engine *nativeEngine) applyResourceSettings(settings nativeResourceSetting
 	router.mu.Lock()
 	router.mode, router.manual = settings.ProxyMode, manual
 	router.mu.Unlock()
+	if transport := engine.downloader.transport; transport != nil {
+		transport.DialContext = dnsDialContext(settings.DNSProvider)
+	}
 	limiter := engine.downloader.limiter
 	limiter.mu.Lock()
 	limiter.concurrency = settings.CatalogConcurrency
@@ -145,6 +161,9 @@ func (engine *nativeEngine) applyResourceSettings(settings nativeResourceSetting
 
 func (engine *nativeEngine) saveResourceSettings(settings nativeResourceSettings) (nativeResourceSettings, error) {
 	settings.ProxyURL = strings.TrimSpace(settings.ProxyURL)
+	if settings.DNSProvider == "" {
+		settings.DNSProvider = "tencent"
+	}
 	settings.Warning = ""
 	settings.SystemProxyStatus = ""
 	if err := settings.validate(); err != nil {

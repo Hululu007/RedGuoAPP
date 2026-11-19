@@ -156,3 +156,18 @@ func (engine *nativeEngine) nativeReleasePlayback(session string) {
 		stream.nativeRelease(choice.streamSession)
 	}
 }
+
+func (engine *nativeEngine) nativeEnableDecrypt(session string) error {
+	engine.mu.Lock()
+	choice, exists := engine.playbacks[session]
+	stream := engine.stream
+	engine.mu.Unlock()
+	if !exists || stream == nil {
+		return errors.New("播放已结束")
+	}
+	key := choice.media[choice.index].CENCKey
+	if len(key) == 0 {
+		return nil
+	}
+	return stream.nativeEnableDecrypt(choice.streamSession, key)
+}

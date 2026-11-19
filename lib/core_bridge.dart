@@ -121,12 +121,14 @@ abstract class AppRepository {
   }) async => const [CatalogCategory.all];
   bool get supportsSourceManagement => false;
   Future<List<SourceModule>> modules() async => const [];
-  Future<ModuleStore> moduleIndex() async => throw AppFailure('当前环境不支持模块商店');
+  Future<ModuleStore> moduleIndex({bool all = false}) async =>
+      throw AppFailure('当前环境不支持模块商店');
   Future<SourceModule> prepareModule({
     String file = '',
     String url = '',
     String indexed = '',
     bool bundled = false,
+    bool all = false,
   }) async => throw AppFailure('当前环境不支持安装模块');
   Future<String> installModule(String token) async =>
       throw AppFailure('当前环境不支持安装模块');
@@ -185,7 +187,6 @@ abstract class AppRepository {
     int quality = 0,
   }) => resolve(drama, episode, quality: quality);
   Future<AppUpdate?> checkUpdate(String version) async => null;
-  Future<void> reportUsage(String version) async {}
   Future<bool> sourceDevices(String source, {bool register = false}) async =>
       true;
   Future<SoraniAccount> soraniAccount() async => const SoraniAccount();
@@ -215,6 +216,7 @@ abstract class AppRepository {
   Future<PlaybackPlan> fallback(PlaybackPlan current);
   Future<void> cancelPlayback();
   Future<void> release(String session);
+  Future<void> enableDecrypt(String session) async {}
 }
 
 class NativeRepository extends AppRepository {
@@ -579,11 +581,6 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Future<void> reportUsage(String version) async {
-    await _call({'action': 'reportUsage', 'version': version});
-  }
-
-  @override
   Future<bool> sourceDevices(String source, {bool register = false}) async =>
       (await _call({
         'action': 'sourceDevices',
@@ -813,9 +810,9 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Future<ModuleStore> moduleIndex() async {
+  Future<ModuleStore> moduleIndex({bool all = false}) async {
     _adminPermission();
-    final result = await _call({'action': 'moduleIndex'});
+    final result = await _call({'action': 'moduleIndex', 'allSources': all});
     return ModuleStore([
       for (final row in result['items'] as List? ?? const [])
         ModuleIndexEntry.fromJson(Map<String, dynamic>.from(row as Map)),
@@ -828,6 +825,7 @@ class NativeRepository extends AppRepository {
     String url = '',
     String indexed = '',
     bool bundled = false,
+    bool all = false,
   }) async {
     _adminPermission();
     return SourceModule.fromJson(
@@ -837,6 +835,7 @@ class NativeRepository extends AppRepository {
         'url': url,
         'source': indexed,
         'bundled': bundled,
+        'allSources': all,
       }),
     );
   }
@@ -1205,5 +1204,13 @@ class NativeRepository extends AppRepository {
     try {
       await _call({'action': 'release', 'session': session});
     } catch (_) {}
+  }
+
+  @override
+  Future<void> enableDecrypt(String session) async {
+    if (session.isEmpty) {
+      return;
+    }
+    await _call({'action': 'enableDecrypt', 'session': session});
   }
 }

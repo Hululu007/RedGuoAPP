@@ -49,6 +49,14 @@ class AppDevice {
     }
   }
 
+  /// 让 ExoPlayer 按「解码方式」选解码器：software 时只用系统软解。
+  static Future<void> setDecoderMode(String mode) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await channel.invokeMethod<void>('setDecoderMode', {'mode': mode});
+    } catch (_) {}
+  }
+
   static Future<bool> compatibleRendering() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
     try {

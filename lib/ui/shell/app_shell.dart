@@ -103,6 +103,12 @@ class _AppShellState extends State<AppShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(offerRestoredModules(context, widget.store));
+      final repository = AppScope.of(context).repository;
+      unawaited(() async {
+        // 等启动流程稳定后再检查，避免和恢复模块弹窗抢占安装流程。
+        await Future<void>.delayed(const Duration(seconds: 6));
+        await autoUpdateModules(repository, widget.store);
+      }());
       runStartupChecks(context, widget.store);
     });
   }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -131,11 +132,23 @@ class _ModulesPageState extends State<ModulesPage>
       _indexError = null;
     });
     try {
-      final index = await _repository.moduleIndex();
-      if (mounted) setState(() => _index = index);
+      final index = await _repository.moduleIndex(
+        all: _store.unlockedSources,
+      );
+      if (!mounted) return;
+      setState(() => _index = index);
+      unawaited(_autoUpdate(index));
     } catch (failure) {
       if (mounted) setState(() => _indexError = '$failure');
     }
+  }
+
+  /// 商店一打开就对比已安装版本，有新版本立刻装，装完刷新列表。
+  Future<void> _autoUpdate(ModuleStore index) async {
+    final updated = await updateInstalledModules(_repository, _store, index);
+    if (updated == 0 || !mounted) return;
+    _show('已自动更新 $updated 个站源');
+    await _refresh();
   }
 
   void _show(String message) {
@@ -164,6 +177,7 @@ class _ModulesPageState extends State<ModulesPage>
       await _repository.prepareModule(
         indexed: entry.id,
         bundled: entry.bundled,
+        all: _store.unlockedSources,
       ),
     ),
   );

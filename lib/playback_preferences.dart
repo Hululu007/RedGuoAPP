@@ -13,7 +13,19 @@ const danmakuColors = [
   0xFF8CF08C,
 ];
 
-enum TelevisionDecoder { optimized, hardware, software, hardwareSwapUv }
+enum TelevisionDecoder { optimized, hardware, software }
+
+enum PlaybackKernel {
+  exo('ExoPlayer'),
+  mpv('MPV');
+
+  const PlaybackKernel(this.label);
+
+  final String label;
+
+  static PlaybackKernel of(String? name) =>
+      PlaybackKernel.values.asNameMap()[name] ?? PlaybackKernel.exo;
+}
 
 enum DanmakuCoverage {
   quarter(.25, '顶部四分之一'),
@@ -107,6 +119,7 @@ class PlaybackPreferences {
     this.danmakuWords = const [],
     this.preload = true,
     this.televisionDecoder = TelevisionDecoder.optimized,
+    this.playbackKernel = PlaybackKernel.exo,
     this.preopen,
     this.doubleTapSeek = true,
     this.swipeLevels = true,
@@ -142,6 +155,7 @@ class PlaybackPreferences {
   final List<String> danmakuWords;
   final bool preload;
   final TelevisionDecoder televisionDecoder;
+  final PlaybackKernel playbackKernel;
   final bool? preopen;
   final bool doubleTapSeek;
   final bool swipeLevels;
@@ -176,6 +190,7 @@ class PlaybackPreferences {
     List<String>? danmakuWords,
     bool? preload,
     TelevisionDecoder? televisionDecoder,
+    PlaybackKernel? playbackKernel,
     bool? preopen,
     bool? doubleTapSeek,
     bool? swipeLevels,
@@ -207,6 +222,7 @@ class PlaybackPreferences {
     danmakuWords: danmakuWords ?? this.danmakuWords,
     preload: preload ?? this.preload,
     televisionDecoder: televisionDecoder ?? this.televisionDecoder,
+    playbackKernel: playbackKernel ?? this.playbackKernel,
     preopen: preopen ?? this.preopen,
     doubleTapSeek: doubleTapSeek ?? this.doubleTapSeek,
     swipeLevels: swipeLevels ?? this.swipeLevels,
@@ -240,6 +256,7 @@ class PlaybackPreferences {
     'danmakuWords': danmakuWords,
     'preload': preload,
     'televisionDecoder': televisionDecoder.name,
+    'playbackKernel': playbackKernel.name,
     if (preopen != null) 'preopen': preopen,
     'doubleTapSeek': doubleTapSeek,
     'swipeLevels': swipeLevels,
@@ -305,6 +322,7 @@ class PlaybackPreferences {
       televisionDecoder:
           TelevisionDecoder.values.asNameMap()[value['televisionDecoder']] ??
           TelevisionDecoder.optimized,
+      playbackKernel: PlaybackKernel.of(value['playbackKernel'] as String?),
       preopen: value['preopen'] as bool?,
       doubleTapSeek: value['doubleTapSeek'] as bool? ?? true,
       swipeLevels: value['swipeLevels'] as bool? ?? true,

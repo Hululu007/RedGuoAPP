@@ -6,16 +6,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_DIRECTORY = ROOT / 'native' / 'core' / 'bundled'
 MODULE_FILES = ('manifest.json', 'main.js')
-ENVIRONMENT_DEFINES = ['PROJECT_URL', 'TELEGRAM_GROUP_URL', 'TELEGRAM_CHANNEL_URL']
+ENVIRONMENT_DEFINES = []
 
 
 class AppBuild:
     slug = 'guoapp'
-    display_name = '小果影视'
+    display_name = '红果剧场'
 
     @property
     def bundle_identifier(self):
-        return os.environ.get('PACKAGE_NAME', '').strip() or 'com.guoapp.app'
+        return os.environ.get('PACKAGE_NAME', '').strip() or 'com.x.redguoapp'
 
     @property
     def flutter_arguments(self):

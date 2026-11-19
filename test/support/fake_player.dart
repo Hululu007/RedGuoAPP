@@ -10,6 +10,9 @@ class FakePlayer implements Player {
   final seeks = <Duration>[];
   var stops = 0;
   var disposed = false;
+
+  /// 挂起 [open]，模拟播放器正在初始化。
+  Completer<void>? openGate;
   final _playing = StreamController<bool>.broadcast(sync: true);
   final _completed = StreamController<bool>.broadcast(sync: true);
   final _position = StreamController<Duration>.broadcast(sync: true);
@@ -87,6 +90,8 @@ class FakePlayer implements Player {
       position: playable.start ?? Duration.zero,
     );
     _playing.add(play);
+    final gate = openGate;
+    if (gate != null) await gate.future;
   }
 
   @override

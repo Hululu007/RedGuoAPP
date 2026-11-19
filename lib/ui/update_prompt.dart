@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_update.dart';
 import '../core_bridge.dart';
 import '../local_store.dart';
+import '../update_installer.dart';
 import 'app_scope.dart';
 import 'widgets/focus_ring.dart';
 
@@ -25,9 +27,6 @@ Future<void> runStartupChecks(BuildContext context, LocalStore store) async {
   final AppUpdate update;
   try {
     current = await currentAppVersion();
-    if (store.shareUsage) {
-      unawaited(repository.reportUsage(current).catchError((_) {}));
-    }
     if (!store.checkUpdates) return;
     final latest = await repository.checkUpdate(current);
     if (latest == null) return;
@@ -43,7 +42,7 @@ Future<void> runStartupChecks(BuildContext context, LocalStore store) async {
     case _UpdateChoice.skip:
       await store.setIgnoredUpdate(update.version);
     case _UpdateChoice.download:
-      if (context.mounted) await _openRelease(context, update.url);
+      if (context.mounted) await _applyUpdate(context, repository, update);
     case _UpdateChoice.dismiss || null:
       return;
   }
@@ -81,7 +80,7 @@ Future<void> checkUpdateManually(BuildContext context) async {
   if (!context.mounted) return;
   final choice = await _askUpdate(context, current, update, manual: true);
   if (choice == _UpdateChoice.download && context.mounted) {
-    await _openRelease(context, update.url);
+    await _applyUpdate(context, repository, update);
   }
 }
 
@@ -125,6 +124,53 @@ Future<_UpdateChoice?> _askUpdate(
   );
 }
 
+/// Android 在应用内下载并交给系统安装程序，其余平台仍然打开发布页。
+Future<void> _applyUpdate(
+  BuildContext context,
+  AppRepository repository,
+  AppUpdate update,
+) async {
+  if (!Platform.isAndroid) return _openRelease(context, update.url);
+  final file = await showDialog<File>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) =>
+        _UpdateDownloadDialog(repository: repository, update: update),
+  );
+  if (file == null || !context.mounted) return;
+  await _installPackage(context, file);
+}
+
+Future<void> _installPackage(BuildContext context, File file) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final status = await UpdateDownload.install(file.path);
+    if (!context.mounted) return;
+    switch (status) {
+      case 'opened':
+        messenger.showSnackBar(
+          const SnackBar(content: Text('已交给系统安装程序，按提示完成安装')),
+        );
+      case 'permission':
+        messenger.showSnackBar(
+          const SnackBar(content: Text('请在系统设置里允许「红果剧场」安装应用，再点一次更新')),
+        );
+      default:
+        messenger.showSnackBar(
+          const SnackBar(content: Text('未能启动安装程序，可改用浏览器下载')),
+        );
+    }
+  } catch (error) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          error is AppFailure ? error.message : '未能启动安装程序，可改用浏览器下载',
+        ),
+      ),
+    );
+  }
+}
+
 Future<void> _openRelease(BuildContext context, String url) async {
   final opened = await launchUrl(
     Uri.parse(url),
@@ -136,5 +182,130 @@ Future<void> _openRelease(BuildContext context, String url) async {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('无法打开浏览器，链接已复制')));
+  }
+}
+
+class _UpdateDownloadDialog extends StatefulWidget {
+  const _UpdateDownloadDialog({required this.repository, required this.update});
+
+  final AppRepository repository;
+  final AppUpdate update;
+
+  @override
+  State<_UpdateDownloadDialog> createState() => _UpdateDownloadDialogState();
+}
+
+class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
+  UpdateDownload? _download;
+  String _stage = '正在查找安装包';
+  String? _error;
+  double _progress = 0;
+  int _lastPercent = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    try {
+      final proxy = await UpdateDownload.proxyOf(widget.repository);
+      final abi = await UpdateDownload.deviceAbi();
+      if (!mounted) return;
+      final download = _download = UpdateDownload(
+        update: widget.update,
+        abi: abi,
+        proxy: proxy,
+      );
+      final file = await download.run(
+        onProgress: () {
+          final percent = (download.progress * 100).floor();
+          if (!mounted || percent == _lastPercent) return;
+          _lastPercent = percent;
+          setState(() {
+            _stage = '正在下载安装包';
+            _progress = download.progress;
+          });
+        },
+      );
+      if (!mounted) return;
+      Navigator.pop(context, file);
+    } catch (error) {
+      if (!mounted) return;
+      if (error is UpdateCancelled) {
+        Navigator.pop(context);
+        return;
+      }
+      setState(() {
+        _error = error is AppFailure ? error.message : '下载失败，请稍后重试';
+      });
+    }
+  }
+
+  void _cancel() {
+    _download?.cancel();
+    Navigator.pop(context);
+  }
+
+  Future<void> _fallback() async {
+    final url = widget.update.url;
+    Navigator.pop(context);
+    final opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    ).catchError((_) => false);
+    if (!opened) await Clipboard.setData(ClipboardData(text: url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _download?.total ?? 0;
+    final received = _download?.received ?? 0;
+    return AlertDialog(
+      title: Text('更新到 ${widget.update.version}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_error == null) ...[
+            LinearProgressIndicator(value: _progress > 0 ? _progress : null),
+            const SizedBox(height: 12),
+          ],
+          Text(_error ?? _stage, style: Theme.of(context).textTheme.bodyMedium),
+          if (_error == null && total > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${(received / 1048576).toStringAsFixed(1)} / '
+              '${(total / 1048576).toStringAsFixed(1)} MB',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+      actions: _error == null
+          ? [
+              FocusRing(
+                radius: 20,
+                child: TextButton(onPressed: _cancel, child: const Text('取消')),
+              ),
+            ]
+          : [
+              FocusRing(
+                radius: 20,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('关闭'),
+                ),
+              ),
+              FocusRing(
+                radius: 20,
+                child: FilledButton(
+                  onPressed: _fallback,
+                  child: const Text('用浏览器下载'),
+                ),
+              ),
+            ],
+    );
   }
 }

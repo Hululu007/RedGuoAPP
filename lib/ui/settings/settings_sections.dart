@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_build.dart';
 import '../../app_device.dart';
@@ -21,6 +19,7 @@ import '../users/users_view.dart';
 import '../widgets/focus_ring.dart';
 import '../widgets/form_text_field.dart';
 import '../widgets/group_card.dart';
+import 'about_notice_view.dart';
 import 'appearance_settings.dart';
 import 'backup_actions.dart';
 import 'boss_key_tile.dart';
@@ -34,7 +33,7 @@ enum SettingsGroup {
   danmaku('弹幕', Icons.subtitles_outlined),
   download('下载', Icons.download_rounded),
   storage('存储', Icons.folder_outlined),
-  proxy('代理', Icons.language_rounded),
+  proxy('网络', Icons.language_rounded),
   users('用户', Icons.manage_accounts_outlined),
   about('关于', Icons.info_outline_rounded),
   diagnostics('诊断', Icons.receipt_long_outlined);
@@ -49,26 +48,18 @@ typedef OpenSubpage = void Function(String title, WidgetBuilder body);
 const adminOnly = '需要管理员';
 const _noDownload = '当前用户没有下载权限';
 const _proxyModes = {'auto': '自动', 'direct': '直连', 'manual': '手动代理'};
+const _dnsProviders = {
+  'system': '系统',
+  'tencent': '腾讯',
+  'ali': '阿里',
+  'google': '谷歌',
+};
 const _counts = {1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6'};
 const _decoders = {
   TelevisionDecoder.optimized: '默认',
   TelevisionDecoder.hardware: '硬解（兼容）',
   TelevisionDecoder.software: '软解（兼容）',
 };
-const _androidDecoders = {
-  ..._decoders,
-  TelevisionDecoder.hardwareSwapUv: '硬解（修正偏蓝）',
-};
-const _links = [
-  [
-    ('GitHub · 重建版', String.fromEnvironment('PROJECT_URL')),
-    ('GitHub · 原作者', 'https://github.com/fish2018'),
-  ],
-  [
-    ('Telegram · 交流群组', String.fromEnvironment('TELEGRAM_GROUP_URL')),
-    ('Telegram · 更新频道', String.fromEnvironment('TELEGRAM_CHANNEL_URL')),
-  ],
-];
 
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
@@ -99,7 +90,7 @@ class SettingsSection extends StatelessWidget {
               SettingsGroup.danmaku => _danmaku(context),
               SettingsGroup.download => _download(context),
               SettingsGroup.storage => _storage(),
-              SettingsGroup.proxy => _proxy(context),
+              SettingsGroup.proxy => _network(context),
               SettingsGroup.users => [UsersView(store: store, open: open)],
               SettingsGroup.about => _about(context),
               SettingsGroup.diagnostics => _diagnostics(),
@@ -190,10 +181,22 @@ class SettingsSection extends StatelessWidget {
       ),
       SettingsCard(
         children: [
+          if (Platform.isAndroid)
+            ValueTile<PlaybackKernel>(
+              title: '播放内核',
+              subtitle: 'ExoPlayer 更省电、打开更快，MPV 兼容性更好；ExoPlayer 解不了片源时会自动改用 MPV 续播',
+              options: {
+                for (final kernel in PlaybackKernel.values)
+                  kernel: kernel.label,
+              },
+              value: preferences.playbackKernel,
+              onChanged: (kernel) =>
+                  savePreferences(preferences.copyWith(playbackKernel: kernel)),
+            ),
           ValueTile<TelevisionDecoder>(
             title: '解码方式',
             subtitle: '有声音没画面或卡顿时可换兼容方式，下次打开视频时生效',
-            options: Platform.isAndroid ? _androidDecoders : _decoders,
+            options: _decoders,
             value: preferences.televisionDecoder,
             onChanged: (decoder) => savePreferences(
               preferences.copyWith(televisionDecoder: decoder),
@@ -460,7 +463,7 @@ class SettingsSection extends StatelessWidget {
     StorageView(store: store),
   ];
 
-  List<Widget> _proxy(BuildContext context) {
+  List<Widget> _network(BuildContext context) {
     final admin = store.profile.admin;
     final settings = editor.settings;
     final editable = settings != null && !editor.saving;
@@ -471,6 +474,18 @@ class SettingsSection extends StatelessWidget {
       SettingsCard(
         children: [
           ?_editorError(),
+          ValueTile<String>(
+            title: 'DNS 服务商',
+            subtitle: '站源访问与下载使用的域名解析服务，改动立即生效',
+            options: _dnsProviders,
+            value: settings?.dnsProvider,
+            onChanged: editable
+                ? (value) => _saveResource(
+                    context,
+                    settings.copyWith(dnsProvider: value),
+                  )
+                : null,
+          ),
           ValueTile<String>(
             title: '连接方式',
             subtitle: !admin
@@ -525,10 +540,7 @@ class SettingsSection extends StatelessWidget {
     return [
       SettingsCard(
         children: [
-          SettingsTile(
-            title: appName,
-            value: version.isEmpty ? '版本未知' : '版本 $version',
-          ),
+          _AppNameTile(version: version, store: store),
           const _UpdateCheckTile(),
           SwitchTile(
             title: '启动时检查更新',
@@ -537,43 +549,39 @@ class SettingsSection extends StatelessWidget {
             onChanged: (value) =>
                 saveSetting(context, () => store.setCheckUpdates(value)),
           ),
-          SwitchTile(
-            title: '匿名使用统计',
-            subtitle: '启动时发送随机编号、版本号、平台和所属版本，用于统计使用人数',
-            value: store.shareUsage,
-            onChanged: (value) =>
-                saveSetting(context, () => store.setShareUsage(value)),
+        ],
+      ),
+      SettingsCard(
+        children: [
+          SettingsTile(
+            title: '软件声明',
+            subtitle: '使用须知、内容来源与免责说明',
+            onTap: () => open(
+              '软件声明',
+              (_) =>
+                  const AboutNoticeView(section: AboutNoticeSection.statement),
+            ),
+          ),
+          SettingsTile(
+            title: '开源许可',
+            subtitle: 'GPL-3.0 授权范围与再分发要求',
+            onTap: () => open(
+              '开源许可',
+              (_) => const AboutNoticeView(section: AboutNoticeSection.license),
+            ),
+          ),
+          SettingsTile(
+            title: '组件列表',
+            subtitle: '使用的开源组件及其许可证',
+            onTap: () => open(
+              '组件列表',
+              (_) =>
+                  const AboutNoticeView(section: AboutNoticeSection.components),
+            ),
           ),
         ],
       ),
-      for (final links in _links)
-        if (links.any((link) => link.$2.isNotEmpty))
-          SettingsCard(
-            children: [
-              for (final (title, url) in links)
-                if (url.isNotEmpty)
-                  SettingsTile(
-                    title: title,
-                    subtitle: url.replaceFirst('https://', ''),
-                    onTap: () => _openLink(context, url),
-                  ),
-            ],
-          ),
     ];
-  }
-
-  Future<void> _openLink(BuildContext context, String url) async {
-    final opened = await launchUrl(
-      Uri.parse(url),
-      mode: LaunchMode.externalApplication,
-    ).catchError((_) => false);
-    if (opened) return;
-    await Clipboard.setData(ClipboardData(text: url));
-    if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('无法打开浏览器，链接已复制')));
-    }
   }
 
   List<Widget> _diagnostics() => [
@@ -615,6 +623,87 @@ class _UpdateCheckTileState extends State<_UpdateCheckTile> {
     value: _busy ? '检查中' : null,
     enabled: !_busy,
     onTap: _check,
+  );
+}
+
+class _AppNameTile extends StatefulWidget {
+  const _AppNameTile({required this.version, required this.store});
+
+  final String version;
+  final LocalStore store;
+
+  @override
+  State<_AppNameTile> createState() => _AppNameTileState();
+}
+
+class _AppNameTileState extends State<_AppNameTile> {
+  var _taps = 0;
+  DateTime? _lastTap;
+
+  void _tap() {
+    final now = DateTime.now();
+    if (_lastTap == null ||
+        now.difference(_lastTap!) > const Duration(seconds: 3)) {
+      _taps = 0;
+    }
+    _lastTap = now;
+    if (++_taps < 10) return;
+    _taps = 0;
+    _askKey();
+  }
+
+  Future<void> _askKey() async {
+    if (widget.store.unlockedSources) {
+      _show('已加载所有站源，前往模块商店安装');
+      return;
+    }
+    final key = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          title: const Text('输入密钥'),
+          content: FormTextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(),
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+    if (key == null) return;
+    if (key.trim() != 'v${widget.version.split('+').first}') {
+      _show('密钥不正确');
+      return;
+    }
+    await widget.store.setUnlockedSources(true);
+    _show('已加载所有站源，前往模块商店安装');
+  }
+
+  void _show(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SettingsTile(
+    title: appName,
+    value: widget.version.isEmpty ? '版本未知' : '版本 ${widget.version}',
+    onTap: _tap,
   );
 }
 

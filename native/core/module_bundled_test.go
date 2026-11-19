@@ -70,12 +70,12 @@ func TestBundledModulesInstallRespectRemovalAndVersions(t *testing.T) {
 		t.Fatal("removed bundled module came back on launch")
 	}
 
-	store, err := engine.moduleStore(context.Background())
+	store, err := engine.moduleStore(context.Background(), false)
 	items, _ := store["items"].([]moduleIndexEntry)
 	if err != nil || len(items) != 1 || !items[0].Bundled || items[0].Version != "1.2.0" || store["warning"] == nil {
 		t.Fatalf("store = %+v, %v", store, err)
 	}
-	prepared, err := engine.prepareModule(context.Background(), "", "", "jsexample", true)
+	prepared, err := engine.prepareModule(context.Background(), "", "", "jsexample", true, false)
 	if err != nil || prepared.Version != "1.2.0" {
 		t.Fatalf("prepare bundled = %+v, %v", prepared, err)
 	}

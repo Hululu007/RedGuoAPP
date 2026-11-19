@@ -30,6 +30,69 @@ Future<String?> applyModuleInstall(
   return null;
 }
 
+/// 依据已经取到的索引，把已安装站源升级到最新版本；返回实际更新的数量。
+/// 内置模块同样参与，装完立即重新注册生效，不需要重启应用。
+Future<int> updateInstalledModules(
+  AppRepository repository,
+  LocalStore store,
+  ModuleStore index,
+) async {
+  if (!store.profile.admin || store.locked) return 0;
+  final List<SourceModule> installed;
+  try {
+    installed = await repository.modules();
+  } catch (_) {
+    return 0;
+  }
+  if (installed.isEmpty) return 0;
+  final latest = <String, ModuleIndexEntry>{};
+  for (final entry in index.entries) {
+    final current = latest[entry.id];
+    if (current == null ||
+        isNewerModuleVersion(entry.version, current.version)) {
+      latest[entry.id] = entry;
+    }
+  }
+  var updated = 0;
+  for (final module in installed) {
+    final entry = latest[module.id];
+    if (entry == null || module.error.isNotEmpty) continue;
+    if (!isNewerModuleVersion(entry.version, module.version)) continue;
+    try {
+      await applyModuleInstall(
+        repository,
+        store,
+        await repository.prepareModule(
+          indexed: entry.id,
+          bundled: entry.bundled,
+          all: store.unlockedSources,
+        ),
+        enable: false,
+      );
+      updated++;
+    } catch (_) {
+      // 单个模块更新失败不影响其它模块，下次再试。
+    }
+  }
+  return updated;
+}
+
+/// 后台检查已安装站源的新版本并自动更新，内置模块同样参与。
+/// 只用当前可见的索引范围：未解锁全量站源时不会接触全量包。
+Future<int> autoUpdateModules(
+  AppRepository repository,
+  LocalStore store,
+) async {
+  if (!store.profile.admin || store.locked) return 0;
+  final ModuleStore index;
+  try {
+    index = await repository.moduleIndex(all: store.unlockedSources);
+  } catch (_) {
+    return 0;
+  }
+  return updateInstalledModules(repository, store, index);
+}
+
 Future<String> installIndexedModules(
   AppRepository repository,
   LocalStore store,
@@ -46,6 +109,7 @@ Future<String> installIndexedModules(
         await repository.prepareModule(
           indexed: entry.id,
           bundled: entry.bundled,
+          all: store.unlockedSources,
         ),
         enable: enable,
       );

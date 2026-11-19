@@ -10,13 +10,14 @@ class ResourceSettings {
   const ResourceSettings({
     this.proxyMode = 'auto',
     this.proxyUrl = '',
+    this.dnsProvider = 'tencent',
     this.catalogConcurrency = 3,
     this.downloadConcurrency = 2,
     this.downloadBySource = false,
     this.warning = '',
     this.systemProxyStatus = '',
   });
-  final String proxyMode, proxyUrl, warning, systemProxyStatus;
+  final String proxyMode, proxyUrl, dnsProvider, warning, systemProxyStatus;
   final int catalogConcurrency, downloadConcurrency;
   final bool downloadBySource;
 
@@ -24,6 +25,7 @@ class ResourceSettings {
       ResourceSettings(
         proxyMode: data['proxyMode'] as String? ?? 'auto',
         proxyUrl: data['proxyUrl'] as String? ?? '',
+        dnsProvider: data['dnsProvider'] as String? ?? 'tencent',
         catalogConcurrency: intValue(data['catalogConcurrency']),
         downloadConcurrency: intValue(data['downloadConcurrency']),
         downloadBySource: data['downloadBySource'] == true,
@@ -34,12 +36,14 @@ class ResourceSettings {
   ResourceSettings copyWith({
     String? proxyMode,
     String? proxyUrl,
+    String? dnsProvider,
     int? catalogConcurrency,
     int? downloadConcurrency,
     bool? downloadBySource,
   }) => ResourceSettings(
     proxyMode: proxyMode ?? this.proxyMode,
     proxyUrl: proxyUrl ?? this.proxyUrl,
+    dnsProvider: dnsProvider ?? this.dnsProvider,
     catalogConcurrency: catalogConcurrency ?? this.catalogConcurrency,
     downloadConcurrency: downloadConcurrency ?? this.downloadConcurrency,
     downloadBySource: downloadBySource ?? this.downloadBySource,
@@ -50,6 +54,7 @@ class ResourceSettings {
   Map<String, dynamic> toJson() => {
     'proxyMode': proxyMode,
     'proxyUrl': proxyUrl,
+    'dnsProvider': dnsProvider,
     'catalogConcurrency': catalogConcurrency,
     'downloadConcurrency': downloadConcurrency,
     'downloadBySource': downloadBySource,

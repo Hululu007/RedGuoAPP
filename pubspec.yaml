@@ -1,7 +1,7 @@
 name: duanju_app
 description: 独立运行的多端短剧应用
 publish_to: none
-version: 2.0.2+114
+version: 2.0.3+115
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -40,10 +40,21 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 dependency_overrides:
+  # 官方 video_player_android 构建 ExoPlayer 时没开解码器回退，电视盒子
+  # 硬解 HEVC 失败会直接报 MediaCodecVideoRenderer error。这里用本地副本
+  # 打开 setEnableDecoderFallback(true)，失败时自动转系统软解。
+  video_player_android:
+    path: third_party/video_player_android
   media_kit_libs_windows_video:
     path: packages/media_kit_libs_windows_video
   media_kit_video:
     path: packages/media_kit_video
+  # path_provider_android 2.3.x 的 JNI 实现在 release 模式下触发
+  # ClassNotFoundException（flutter/flutter#184750），锁定 2.2.x 规避。
+  path_provider_android: 2.2.23
+  # shared_preferences_android 2.5.x 同样改用 JNI 实现，锁定最后的纯
+  # platform channel 版本规避同类问题。
+  shared_preferences_android: 2.4.28
   shared_preferences_windows:
     path: packages/shared_preferences_windows
 

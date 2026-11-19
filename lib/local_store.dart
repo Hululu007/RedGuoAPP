@@ -24,7 +24,6 @@ const coverBlurLaunchModes = {'off': '关闭', 'adult': '仅限制级', 'all': '
 const _movedFlags = {
   'followSystemColor': 'followSystemColor',
   'checkUpdates': 'checkUpdates',
-  'shareUsage': 'shareUsage',
   'autoExport': 'exportAfterDownload',
   'deleteAfterAutoExport': 'deleteAfterAutoExport',
   'deleteAfterManualExport': 'deleteAfterManualExport',
@@ -33,7 +32,6 @@ const _movedFlags = {
 const _movedTexts = {'themeColor', 'ignoredUpdate'};
 const _backupFlags = {
   'checkUpdates',
-  'shareUsage',
   'exportAfterDownload',
   'deleteAfterAutoExport',
   'deleteAfterManualExport',
@@ -70,6 +68,8 @@ class LocalStore extends ChangeNotifier {
 
   final SharedPreferences preferences;
   final LocalFiles files;
+  static const _kernelRevisionKey = 'kernelDefault';
+  static const _kernelRevision = 2;
   final Future<String> Function(String pin, String salt) _pinHasher;
   final Map<String, WatchEntry> _history = {};
   final Map<String, Drama> _favorites = {};
@@ -262,6 +262,26 @@ class LocalStore extends ChangeNotifier {
         _followChecks[entry.key] = FollowCheck.fromJson(entry.value);
       } catch (_) {}
     }
+    await _migratePlaybackKernel(id);
+  }
+
+  /// 旧版本以 MPV 为默认内核，切换默认值后把沿用默认的用户迁移到 ExoPlayer，
+  /// 每个用户只执行一次；之后在设置里改回 MPV 不会再被覆盖。
+  Future<void> _migratePlaybackKernel(String id) async {
+    if (_userSettings[_kernelRevisionKey] == _kernelRevision) return;
+    final playback = _map(_userSettings['playback']);
+    final legacyKernel = playback['playbackKernel'];
+    final updated = <String, Object?>{
+      ..._userSettings,
+      _kernelRevisionKey: _kernelRevision,
+      if (legacyKernel == PlaybackKernel.mpv.name)
+        'playback': <String, Object?>{
+          ...playback,
+          'playbackKernel': PlaybackKernel.exo.name,
+        },
+    };
+    await _write(_userFile(id, 'settings'), updated);
+    _userSettings = updated;
   }
 
   static List<LocalProfile> _readProfiles(dynamic records) {
@@ -475,6 +495,9 @@ class LocalStore extends ChangeNotifier {
   bool get sideBarExpanded => preferences.getBool('sideBarExpanded') ?? true;
   bool get playerWide => preferences.getBool('playerWide') ?? false;
   double get playerVolume => preferences.getDouble('playerVolume') ?? 100;
+  /// 该设备上 ExoPlayer 硬解过不了 HEVC 等片源，播放会话检测到后置位，
+  /// 之后开播直接走 MPV；在设置里重新选回 Exo 会清掉这个标记。
+  bool get exoDecoderBroken => _flag('exoDecoderBroken', false);
   ({double left, double top, double extent})? get miniWindow {
     final values = preferences
         .getString('miniWindow')
@@ -491,6 +514,7 @@ class LocalStore extends ChangeNotifier {
   bool get historyTab => _flag('historyTab', true);
   bool get pureBlack => _flag('pureBlack', false);
   bool get blurCoversButton => _flag('blurCoversButton', false);
+  bool get unlockedSources => _flag('unlockedSources', false);
   String get blurCoversLaunch => switch (_settings['blurCoversLaunch']) {
     final String mode when coverBlurLaunchModes.containsKey(mode) => mode,
     _ => _flag('blurCoversOnLaunch', false) ? 'all' : 'off',
@@ -500,7 +524,6 @@ class LocalStore extends ChangeNotifier {
   bool get autoExport => _flag('exportAfterDownload', false);
   bool get deleteAfterAutoExport => _flag('deleteAfterAutoExport', false);
   bool get deleteAfterManualExport => _flag('deleteAfterManualExport', false);
-  bool get shareUsage => _flag('shareUsage', true);
   int get acceptedTerms => switch (_settings['acceptedTerms']) {
     final int version => version,
     _ => 0,
@@ -627,6 +650,8 @@ class LocalStore extends ChangeNotifier {
   });
   Future<void> setPlayerVolume(double value) =>
       _queue(() => preferences.setDouble('playerVolume', value));
+  Future<void> setExoDecoderBroken(bool value) =>
+      _setting('exoDecoderBroken', value);
   Future<void> setMiniWindow(
     ({double left, double top, double extent}) value,
   ) => _queue(
@@ -641,6 +666,8 @@ class LocalStore extends ChangeNotifier {
   Future<void> setPureBlack(bool value) => _setting('pureBlack', value);
   Future<void> setBlurCoversButton(bool value) =>
       _setting('blurCoversButton', value);
+  Future<void> setUnlockedSources(bool value) =>
+      _setting('unlockedSources', value);
   Future<void> setBlurCoversLaunch(String value) =>
       coverBlurLaunchModes.containsKey(value)
       ? _setting('blurCoversLaunch', value)
@@ -653,14 +680,18 @@ class LocalStore extends ChangeNotifier {
       _setting('deleteAfterAutoExport', value);
   Future<void> setDeleteAfterManualExport(bool value) =>
       _setting('deleteAfterManualExport', value);
-  Future<void> setShareUsage(bool value) => _setting('shareUsage', value);
   Future<void> setAcceptedTerms(int version) =>
       _setting('acceptedTerms', version);
   Future<void> setIgnoredUpdate(String version) =>
       _setting('ignoredUpdate', version);
-  Future<void> setPlaybackPreferences(PlaybackPreferences value) {
+  Future<void> setPlaybackPreferences(PlaybackPreferences value) async {
     PlaybackPreferences.fromJson(value.toJson());
-    return _userSetting('playback', value.toJson());
+    final retryExo =
+        value.playbackKernel == PlaybackKernel.exo &&
+        playbackPreferences.playbackKernel != PlaybackKernel.exo;
+    await _userSetting('playback', value.toJson());
+    // 用户主动选回 ExoPlayer，说明想再试一次，清掉之前的解码失败标记。
+    if (retryExo) await _setting('exoDecoderBroken', false);
   }
 
   Future<void> setDownloadPreferences(DownloadPreferences value) {
@@ -1073,7 +1104,6 @@ class LocalStore extends ChangeNotifier {
       'blurAllCovers': blurAllCovers,
       'forceLogin': forceLogin,
       'checkUpdates': checkUpdates,
-      'shareUsage': shareUsage,
       'exportAfterDownload': autoExport,
       'deleteAfterAutoExport': deleteAfterAutoExport,
       'deleteAfterManualExport': deleteAfterManualExport,

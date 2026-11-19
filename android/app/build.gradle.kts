@@ -5,7 +5,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-val appPackageName = System.getenv("PACKAGE_NAME")?.trim()?.takeIf { it.isNotEmpty() } ?: "com.guoapp.app"
+val appPackageName = System.getenv("PACKAGE_NAME")?.trim()?.takeIf { it.isNotEmpty() } ?: "com.x.redguoapp"
 
 val releaseKey = rootProject.file("key.properties")
 val releaseProperties = Properties()
@@ -37,7 +37,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        manifestPlaceholders["appLabel"] = "小果影视"
+        manifestPlaceholders["appLabel"] = "红果剧场"
         manifestPlaceholders["appBanner"] = "@drawable/tv_banner"
     }
 
@@ -76,6 +76,11 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    // 应用内更新要走 FileProvider 把安装包交给系统安装程序。
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 flutter { source = "../.." }

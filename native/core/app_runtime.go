@@ -37,6 +37,7 @@ type Downloader struct {
 	providerRevisions map[string]uint64
 	limiter           *requestLimiter
 	proxyRouter       *proxyRouter
+	transport         *http.Transport
 	directOnce        sync.Once
 	direct            *http.Client
 	diagnostics       *diagnosticLog
@@ -69,6 +70,7 @@ type nativeInput struct {
 	Settings        nativeResourceSettings  `json:"settings"`
 	JobIDs          []string                `json:"jobIds"`
 	PlaybackSession string                  `json:"playbackSession"`
+	AllSources      bool                    `json:"allSources"`
 	StartMS         int64                   `json:"startMs"`
 	DurationMS      int64                   `json:"durationMs"`
 	Board           string                  `json:"board"`
@@ -262,6 +264,7 @@ func newNativeEngine(directory, cache, downloads string) (*nativeEngine, error) 
 	transport.ResponseHeaderTimeout = 20 * time.Second
 	transport.Proxy = router.proxy
 	cdn := newCDNTransport(transport, newDNSResolver(transport))
+	d.transport = transport
 	d.client = &http.Client{Transport: newHuangguoBrowserTransport(cdn, d), Timeout: 45 * time.Second,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
@@ -385,9 +388,9 @@ func nativeDispatch(input nativeInput) (any, error) {
 		items, err := engine.modules()
 		return map[string]any{"items": items}, err
 	case "moduleIndex":
-		return engine.moduleStore(ctx)
+		return engine.moduleStore(ctx, input.AllSources)
 	case "prepareModule":
-		return engine.prepareModule(ctx, input.File, input.URL, input.Source, input.Bundled)
+		return engine.prepareModule(ctx, input.File, input.URL, input.Source, input.Bundled, input.AllSources)
 	case "installModule":
 		return engine.installModule(input.Token)
 	case "uninstallModule":
@@ -481,12 +484,12 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "release":
 		engine.nativeReleasePlayback(input.Session)
 		return true, nil
+	case "enableDecrypt":
+		return true, engine.nativeEnableDecrypt(input.Session)
 	case "cast":
 		return engine.nativeCast(ctx, input)
 	case "checkUpdate":
 		return engine.checkUpdate(ctx, input.Version)
-	case "reportUsage":
-		return true, engine.reportUsage(ctx, input.Version)
 	default:
 		return nil, errors.New("不支持的应用操作")
 	}

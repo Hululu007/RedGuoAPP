@@ -4,11 +4,11 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../../local_store.dart';
 import '../../models.dart';
 import '../../playback_preferences.dart';
+import '../../playback_engine.dart';
 import '../../playback_session.dart';
 import '../app_scope.dart';
 import '../downloads/download_actions.dart';
@@ -53,7 +53,7 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
     with WidgetsBindingObserver {
   late final _pages = PageController(initialPage: _session.index);
   final List<StreamSubscription<dynamic>> _subscriptions = [];
-  Player? _bound;
+  EnginePlayer? _bound;
   Timer? _hintTimer;
   String _hint = '';
   bool _scrolling = false;

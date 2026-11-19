@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../../app_device.dart';
 import '../../local_store.dart';
 import '../../picture_in_picture.dart';
+import '../../playback_engine.dart';
 import '../../playback_session.dart';
 import '../app_scope.dart';
 import 'landscape_player_page.dart';
@@ -35,7 +35,7 @@ class _PlaybackPageState extends State<PlaybackPage> {
   MediaQueryData? _media;
   bool _shown = false;
   bool _locked = false;
-  Player? _bound;
+  EnginePlayer? _bound;
   StreamSubscription<bool>? _playing;
 
   PlaybackSession get _session => widget.handle.session;

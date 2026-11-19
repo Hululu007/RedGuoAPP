@@ -43,9 +43,11 @@ import android.view.WindowManager
 import android.provider.Settings
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.videoplayer.DecoderPreference
 import java.io.File
 import java.io.IOException
 import kotlin.math.roundToInt
@@ -341,8 +343,22 @@ class MainActivity : FlutterActivity() {
                     when (call.method) {
                         "deviceInfo" -> {
                             val version = packageManager.getPackageInfo(packageName, 0).versionName
-                            result.success(mapOf("television" to isTelevisionDevice(), "version" to version))
+                            result.success(mapOf(
+                                "television" to isTelevisionDevice(),
+                                "version" to version,
+                                "abi" to installedAbi()
+                            ))
                         }
+                        "setDecoderMode" -> {
+                            // 「解码方式」选软件解码时，ExoPlayer 只用系统软解。
+                            DecoderPreference.softwareOnly =
+                                call.argument<String>("mode") == "software"
+                            result.success(null)
+                        }
+                        "installUpdate" -> installUpdate(
+                            call.argument<String>("path"),
+                            result
+                        )
                         "setTelevisionMode" -> {
                             val enabled = call.argument<Boolean>("enabled")
                             if (enabled == null) {
@@ -561,6 +577,58 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
+    }
+
+    /**
+     * 当前已安装包实际运行的 ABI。64 位设备上装的 32 位包要更新成 32 位包，
+     * 所以优先看 native 库解压目录，退而求其次才用设备支持的 ABI。
+     */
+    private fun installedAbi(): String {
+        val folder = applicationInfo.nativeLibraryDir.orEmpty().substringAfterLast('/')
+        val abi = when (folder) {
+            "arm64" -> "arm64-v8a"
+            "arm" -> "armeabi-v7a"
+            "x86_64" -> "x86_64"
+            "x86" -> "x86"
+            else -> ""
+        }
+        if (abi.isNotEmpty()) return abi
+        return Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
+    }
+
+    private fun installUpdate(path: String?, result: MethodChannel.Result) {
+        if (path.isNullOrEmpty()) {
+            result.error("invalid_apk", "安装包路径为空", null)
+            return
+        }
+        val file = File(path)
+        if (!file.isFile || file.length() <= 0) {
+            result.error("missing_apk", "安装包不存在或为空", null)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !packageManager.canRequestPackageInstalls()) {
+            runCatching {
+                startActivity(Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName")
+                ))
+            }
+            result.success("permission")
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.updates", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success("opened")
+        } catch (e: Exception) {
+            result.error("install_failed", "无法启动安装程序：${e.message}", null)
+        }
     }
 
     private fun exportVideo(source: File, folder: String, name: String) {

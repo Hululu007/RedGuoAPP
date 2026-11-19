@@ -35,7 +35,7 @@ python3 scripts/build_ios.py --core-only [--simulator]
 python3 scripts/build_ios.py --export-options /path/to/ExportOptions.plist
 ~~~
 
-产物在 `dist/android`、`dist/windows`、`dist/ios`、`dist/macos`，以 `guoapp-` 开头。Windows 同时出便携 zip 和 Inno Setup 安装包（`windows/installer/setup.iss`，简体中文语言文件取自 Inno Setup 官方仓库），安装包以包名为 AppId，默认装到 `%LOCALAPPDATA%\Programs\<包名>`，安装时可提权改为所有用户，卸载窗口先显示「卸载选项」页（插在卸载进度窗口里），勾选「同时清除本地数据」才删除 `%APPDATA%\<包名>`（含默认下载目录），默认保留；静默卸载不删。缓存目录 `%LOCALAPPDATA%\<包名>` 卸载时总是删除。macOS 出 arm64 + x86_64 通用 dmg；dmg 的安装窗口（背景图、图标位置、隐藏工具栏）由 `dmgbuild` 写入 `.DS_Store`，打包机需要 `pip install dmgbuild Pillow`，没装时会退回普通镜像并提示。默认 ad-hoc 签名，从网络下载的 dmg 在其他 Mac 上首次打开会被 Gatekeeper 拦一次（右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/小果影视.app`）。有 Developer ID 时用 `package_release.py --platform macos --identity "Developer ID Application: ..."` 重新打包并公证，才能免掉这一步。本机 Android 签名读 `android/key.properties`（不入库）。
+产物在 `dist/android`、`dist/windows`、`dist/ios`、`dist/macos`，以 `guoapp-` 开头。Windows 同时出便携 zip 和 Inno Setup 安装包（`windows/installer/setup.iss`，简体中文语言文件取自 Inno Setup 官方仓库），安装包以包名为 AppId，默认装到 `%LOCALAPPDATA%\Programs\<包名>`，安装时可提权改为所有用户，卸载窗口先显示「卸载选项」页（插在卸载进度窗口里），勾选「同时清除本地数据」才删除 `%APPDATA%\<包名>`（含默认下载目录），默认保留；静默卸载不删。缓存目录 `%LOCALAPPDATA%\<包名>` 卸载时总是删除。macOS 出 arm64 + x86_64 通用 dmg；dmg 的安装窗口（背景图、图标位置、隐藏工具栏）由 `dmgbuild` 写入 `.DS_Store`，打包机需要 `pip install dmgbuild Pillow`，没装时会退回普通镜像并提示。默认 ad-hoc 签名，从网络下载的 dmg 在其他 Mac 上首次打开会被 Gatekeeper 拦一次（右键「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/红果剧场.app`）。有 Developer ID 时用 `package_release.py --platform macos --identity "Developer ID Application: ..."` 重新打包并公证，才能免掉这一步。本机 Android 签名读 `android/key.properties`（不入库）。
 
 其他脚本：`generate_brand_assets.py` 从 `brand_icon.svg` 生成各平台图标；`clear_app_data.py`、`clear_catalog_cache.py` 清理 Windows 上的应用数据和剧库缓存。
 
@@ -59,7 +59,7 @@ Flutter 界面 + Go 原生核心。站源请求、解析、签名、缓存、下
 - **FFI**：`native/bridge` 以 `-buildmode=c-shared` 只导出 `DuanjuRequest(json) -> json` 与 `DuanjuFree`。`lib/core_bridge.dart` 的 `NativeRepository` 把每次调用编码成 `{"action": ...}`，在 `Isolate.run` 中调用；Go 侧在 `native/core/app_runtime.go` 的 `NativeRequest` 里按 action 分派。新增能力两端都要改。Android 与 Windows 动态加载（`libduanju_core.so` / `duanju_core.dll`）；iOS 与 macOS 改成 `-buildmode=c-archive` 静态库（`ios/DuanjuCore`、`macos/DuanjuCore`）链进主程序，Dart 侧用 `DynamicLibrary.process()` 查符号，避免 dylib 的签名与库校验问题。
 - **Go 核心**：`native/core` 是运行时。站源模块由 `module_loader.go` 读取清单并注册，`module_script.go` 用 [goja](https://github.com/dop251/goja) 执行并适配成内部的 `Provider` 接口。`app_*.go` 运行时与业务（目录缓存、下载、弹幕、存储、设置），`network_*.go` HTTP 客户端、DNS、CDN、限流。`app_stream.go` 在本机起播放代理，重写 HLS playlist、透传 Range，并处理带密钥的媒体。
 - **Flutter**：界面在 `lib/ui/`（按页面分子目录，入口 `lib/main.dart` → `lib/ui/app.dart`），逻辑层平铺在 `lib/`，状态管理只用 ChangeNotifier。
-- **播放与下载**：播放器用 [media_kit](https://github.com/media-kit/media-kit) / libmpv；每集下载完由 [FFmpegKit min-gpl](https://github.com/sk3llo/ffmpeg_kit_flutter)（含 GPL 媒体组件）转成单个 mp4，只换封装、不重新编码，不参与正常播放。
+- **播放与下载**：播放器默认用 [media_kit](https://github.com/media-kit/media-kit) / libmpv；Android 可选 ExoPlayer 内核（`video_player` 的 Media3 实现），由 `PlaybackEnginePlayer`（`lib/playback_engine.dart`）外观层统一两个内核的接口，MPV 专属的 mpv 属性调用以 `platform == null` 守卫跳过；两个内核的播放地址都是 Go 本地流服务器的 `127.0.0.1` 地址，上游请求统一走代理/DNS 设置。CENC 加密媒体：MPV 通过 ffmpeg `decryption_key` 属性解密；Exo 内核改由 Go 流服务端解密（播放会话经 `enableDecrypt` 动作挂上 `cencKey`，媒体分片走 `nativeServeDecrypted`），HLS AES-128 密钥由播放列表改写直接下发，两种内核通用；每集下载完由 [FFmpegKit min-gpl](https://github.com/sk3llo/ffmpeg_kit_flutter)（含 GPL 媒体组件）转成单个 mp4，只换封装、不重新编码，不参与正常播放。
 - **本地数据**：存储格式须兼容旧版。本地快照遇到未知键会整体报错，新增设置若要兼容旧版须存为快照外的独立键。
 
 ## 目录结构
@@ -82,7 +82,7 @@ Flutter 界面 + Go 原生核心。站源请求、解析、签名、缓存、下
 - 位置：数据目录下的 `modules/<模块标识>/`，应用启动时加载。Windows 的数据目录是 `%APPDATA%\<包名>`，便携版是程序旁的 `userdata`。
 - 文件：`manifest.json` 与 `main.js`，写法参照 `native/module_example/jsexample`。
 - 安装包：zip，`manifest.json` 和 `main.js` 放在根目录或唯一的一层文件夹里，其余文件忽略，整包不超过 8 MB。在「模块」页里从文件或地址安装，同一标识覆盖旧版本，标识或别名与其他站源重复时拒绝安装；安装和卸载不用重启。
-- 模块商店：读取 GitHub 组织 guoapp-modules 的 `index` 仓库里的 `index.json`（先 raw.githubusercontent.com，失败换 jsDelivr），按其中的仓库和标签下载 `manifest.json` 与 `main.js` 并核对 sha256，再走同样的安装确认。模块的发版和上架方式见该组织的 `template` 与 `index` 仓库。
+- 模块商店：读取 `xycvip/RedGuoAPI` 仓库主分支的 `index.json`（先 raw.githubusercontent.com，失败换 jsDelivr），按索引条目的 `repo` 与 `path` 从仓库主分支下载 `manifest.json` 与 `main.js` 并核对 sha256，再走同样的安装确认。商店默认只显示精简索引；在「关于」页连续点击应用名 10 次（3 秒内）会弹出密钥输入框，密钥为 `v` 加当前版本号（如 `v2.0.2`），输入正确后商店只使用全量索引 `allindex.json`（包含全部站源），提示「已加载所有站源，前往模块商店安装」，解锁状态存在本地设置 `unlockedSources`。
 - 内置模块：`build_native.py` / `build_ios.py` 把 `--bundle <模块目录>`（可多次指定）和环境变量 `BUNDLED_MODULES`（逗号分隔）里的模块复制到 `native/core/bundled/`（相对路径以仓库根目录为准），由 Go 以 `go:embed` 打进核心；该目录除 `.gitkeep` 外不入库，每次出包前清空重建。应用启动时，未安装或内置版本更高的内置模块写入数据目录的 `modules/`，用户卸载过的不再自动安装（记在 `modules/.bundled-removed.json`），模块商店在「内置」里照常列出，从安装包内的副本安装，索引读不到时也能装；索引里也有同一模块时，「在线仓库」另列一项，从索引下载，已安装模块按两者中较高的版本提示更新。官方包内置红果，CI 把公开仓库 guoapp-modules/hongguo 检出到 `bundled-modules/hongguo`。
 - 清单：`id`（小写字母、数字、`_`、`-`，最长 32 个字符，须与文件夹同名）、`name`、`version`、`description`、`runtime`（只支持 `js`）、`api`（当前为 `1`）、`adult`（必填，是否限制级内容，`true` 或 `false`）、`hosts`（允许请求的域名，`*.example.com` 匹配子域名）、`capabilities`（可选能力，见下表）、`rankings`（榜单列表，每项 `id`、`name`、`description`）。`mediaAuthPaths`（声明 `mediaAuth` 时必填，见下表）。其余可选字段对应站源描述：`allowEmptyCatalog`、`group`、`groupName`、`entryName`、`skipVipPrompt`、`aliases`、`hostSuffixes`、`baseUrl`、`noHostRotation`、`keepDetailEpisodes`、`continuousFeed`、`browserFingerprint`。
 - 入口：`main.js` 是 CommonJS，用 `module.exports` 导出 `categories(force)`、`catalogPage(page, category)`、`detail(sourceId)`、`resolveMedia(task)`，以及可选的 `validCategory(category)`。`categories` 只取到部分分类时返回 `{ items, incomplete: true }`，应用稍后会重取；`catalogPage` 和 `search` 返回 `{ items, hasMore, warning }`，有剧集又有 `warning` 时作为提示显示。函数必须同步返回，不能是异步函数。需要用户登录时抛出带 `loginRequired = true` 属性的 `Error`。
@@ -137,23 +137,20 @@ Flutter 界面 + Go 原生核心。站源请求、解析、签名、缓存、下
 
 Android 签名只用仓库 Secrets：`SIGNING_KEYSTORE_BASE64`、`SIGNING_KEYSTORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`，另需仓库变量 `SIGNING_CERT_SHA256`（证书 SHA-256，冒号和大小写不限），缺任意一项都会失败。CI 通过环境变量把签名传给 Gradle；本机读 `android/key.properties`（不入库）。
 
-包名取环境变量 `PACKAGE_NAME`（CI 取同名仓库变量），没设或为空时用 `com.guoapp.app`，由 Android `build.gradle.kts`、Windows `app_branding.cmake`、iOS / macOS `scripts/app_build.py` 读取。应用名固定为「小果影视」，英文名 `GuoApp`；安装包前缀、Windows 可执行文件和使用统计的构建标识为 `guoapp`。
+包名取环境变量 `PACKAGE_NAME`（CI 取同名仓库变量），没设或为空时用 `com.x.redguoapp`，由 Android `build.gradle.kts`、Windows `app_branding.cmake`、iOS / macOS `scripts/app_build.py` 读取。应用名固定为「红果剧场」，英文名 `RedGuo`；安装包前缀和 Windows 可执行文件为 `guoapp`。
 
 Windows 数据目录为 `%APPDATA%\<包名>`：`Runner.rc` 不设 CompanyName，ProductName 为包名，`path_provider` 据此拼出应用支持目录。删除不影响使用的缓存（`covers-v1/`、`catalogs.json`、`rankings.json`）放在 `getApplicationCacheDirectory()` 给出的目录，Windows 为 `%LOCALAPPDATA%\<包名>`，便携版为 `userdata\cache`；初始化时由 `moveLegacyNativeCache` 把数据目录里的旧缓存搬过去，新增缓存文件要写进 `cacheDirectory` 并加到这份清单。站源的 `CatalogState`（红果设备、辅助设备和列表游标）不算缓存，存在数据目录的 `provider-states.json`，旧版写在 `catalogs.json` 里的会在首次启动时迁出。旧版数据在 `%APPDATA%\真果鉴\真果鉴`，`lib/windows_data_migration.dart` 在启动最早阶段检查：新目录为空且旧目录存在时整个改名移入；新目录已有内容或移动失败都不处理，失败写入日志。Android TV 横幅 `tv_banner.png` 只有图标不带文字，改名不用重新生成。
 
-关于页的重建版 GitHub、Telegram 交流群组和更新频道链接分别取环境变量 `PROJECT_URL`、`TELEGRAM_GROUP_URL`、`TELEGRAM_CHANNEL_URL`（CI 取同名仓库变量），由 `scripts/app_build.py` 作为 `--dart-define` 传给 Flutter；没设的链接在关于页不显示，直接 `flutter run` 时需自行加 `--dart-define`。`PROJECT_URL` 同时注入 Go 的 `nativeProjectURL`，检查更新只接受 `{PROJECT_URL}/releases/` 开头的发布页，没设时启动不提示更新，手动检查更新会提示没有配置。
+`PROJECT_URL` 注入 Go 的 `nativeProjectURL`，检查更新只接受 `{PROJECT_URL}/releases/` 开头的发布页，没设时启动不提示更新，手动检查更新会提示没有配置。
 
-## 检查更新与使用统计
+## 检查更新
 
-接收端是 Cloudflare Worker `guoapp-update`（`worker/`，D1 数据库 `guoapp-stats`），地址在编译期由环境变量 `UPDATE_SERVER_URL` 经 `scripts/app_build.py` 注入 Go（CI 取仓库变量 `UPDATE_SERVER_URL`），没设时检查更新和使用统计都不发请求，fork 和本地构建默认不会连到这里。变量可填逗号分隔的多个地址，Go 按顺序尝试，前一个连不上或返回错误时换下一个；CI 里先填国内可直连的中转服务器，再填 Worker。Go 核心（`native/core/app_update.go`）的 `checkUpdate` 请求 `GET /v1/latest`，只读不写；`reportUsage` 请求 `POST /v1/ping`，按北京时间日期和随机编号在 `pings` 表里每天记一行。两者分别由设置里的「启动时检查更新」和「匿名使用统计」控制。各平台点「更新」都只打开发布页，应用内不下载安装包。Worker 每小时从 GitHub 读取最新 Release 写入 `meta` 表。改 Worker 后在 `worker/` 下运行 `npx wrangler deploy`。
+接收端是 Cloudflare Worker `guoapp-update`（`worker/`，D1 数据库 `guoapp-stats`），地址在编译期由环境变量 `UPDATE_SERVER_URL` 经 `scripts/app_build.py` 注入 Go（CI 取仓库变量 `UPDATE_SERVER_URL`），没设时检查更新不发请求，fork 和本地构建默认不会连到这里。变量可填逗号分隔的多个地址，Go 按顺序尝试，前一个连不上或返回错误时换下一个；CI 里先填国内可直连的中转服务器，再填 Worker。Go 核心（`native/core/app_update.go`）的 `checkUpdate` 请求 `GET /v1/latest`，只读不写，由设置里的「启动时检查更新」控制。各平台点「更新」都只打开发布页，应用内不下载安装包。Worker 每小时从 GitHub 读取最新 Release 写入 `meta` 表。改 Worker 后在 `worker/` 下运行 `npx wrangler deploy`。
 
 在 `worker/` 下查询（`--remote` 查线上库）：
 
 ~~~sh
-npx wrangler d1 execute guoapp-stats --remote --command "SELECT day, COUNT(*) AS users FROM pings GROUP BY day ORDER BY day DESC LIMIT 30"   # 日活
-npx wrangler d1 execute guoapp-stats --remote --command "SELECT COUNT(DISTINCT id) FROM pings WHERE day >= date('now', '-30 days')"          # 近 30 天活跃
-npx wrangler d1 execute guoapp-stats --remote --command "SELECT COUNT(DISTINCT id) FROM pings"                                               # 累计装机
-npx wrangler d1 execute guoapp-stats --remote --command "SELECT platform, build, version, COUNT(*) FROM pings WHERE day = date('now', '+8 hours') GROUP BY 1, 2, 3 ORDER BY 4 DESC"  # 今日分布
+npx wrangler d1 execute guoapp-stats --remote --command "SELECT version, updated_at FROM meta"
 ~~~
 
-应用显示名：Android 在 `android/app/build.gradle.kts`，Windows 在 `windows/runner/app_branding.cmake`，iOS 由 Xcode「Thin Binary」构建阶段写入，macOS 由 `scripts/package_release.py` 打包时改 `CFBundleDisplayName` / `CFBundleName` / `CFBundleIdentifier` 后重新签名。iOS 的 `CFBundleDisplayName` 用英文名 `GuoApp` 以通过侧载工具的名称校验，中文名写在 `zh-Hans.lproj/InfoPlist.strings`。macOS 关闭了 App Sandbox，以便本地播放代理和自选下载目录正常工作；系统代理由 `MainFlutterWindow.swift` 的 `duanju/device` 通道读取。
+应用显示名：Android 在 `android/app/build.gradle.kts`，Windows 在 `windows/runner/app_branding.cmake`，iOS 由 Xcode「Thin Binary」构建阶段写入，macOS 由 `scripts/package_release.py` 打包时改 `CFBundleDisplayName` / `CFBundleName` / `CFBundleIdentifier` 后重新签名。iOS 的 `CFBundleDisplayName` 用英文名 `RedGuo` 以通过侧载工具的名称校验，中文名写在 `zh-Hans.lproj/InfoPlist.strings`。macOS 关闭了 App Sandbox，以便本地播放代理和自选下载目录正常工作；系统代理由 `MainFlutterWindow.swift` 的 `duanju/device` 通道读取。

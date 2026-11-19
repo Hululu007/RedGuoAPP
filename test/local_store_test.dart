@@ -218,6 +218,53 @@ void main() {
         expect(await store.files.exists(), isFalse);
       });
     }
+
+    test('沿用旧默认内核的记录升级后改用 ExoPlayer，且只迁移一次', () async {
+      final files = temporaryFiles();
+      final store = await openStore(const {}, null, files);
+      await store.setPlaybackPreferences(
+        store.playbackPreferences.copyWith(playbackKernel: PlaybackKernel.mpv),
+      );
+      final saved = Map<String, Object?>.from(
+        await files.read('users/default/settings.json') as Map,
+      )..remove('kernelDefault');
+      await files.write('users/default/settings.json', saved);
+
+      final migrated = await openStore(const {}, null, files);
+      expect(migrated.playbackPreferences.playbackKernel, PlaybackKernel.exo);
+      await migrated.setPlaybackPreferences(
+        migrated.playbackPreferences.copyWith(
+          playbackKernel: PlaybackKernel.mpv,
+        ),
+      );
+
+      final reopened = await openStore(const {}, null, files);
+      expect(reopened.playbackPreferences.playbackKernel, PlaybackKernel.mpv);
+    });
+
+    test('解码失败标记会留存，主动选回 ExoPlayer 后清零', () async {
+      final files = temporaryFiles();
+      final store = await openStore(const {}, null, files);
+      expect(store.exoDecoderBroken, isFalse);
+
+      await store.setExoDecoderBroken(true);
+      expect(store.exoDecoderBroken, isTrue);
+      final reopened = await openStore(const {}, null, files);
+      expect(reopened.exoDecoderBroken, isTrue);
+
+      await reopened.setPlaybackPreferences(
+        reopened.playbackPreferences.copyWith(
+          playbackKernel: PlaybackKernel.mpv,
+        ),
+      );
+      expect(reopened.exoDecoderBroken, isTrue);
+      await reopened.setPlaybackPreferences(
+        reopened.playbackPreferences.copyWith(
+          playbackKernel: PlaybackKernel.exo,
+        ),
+      );
+      expect(reopened.exoDecoderBroken, isFalse);
+    });
   });
 
   group('files', () {
@@ -398,7 +445,6 @@ void main() {
       await store.setFollowSystemColor(false);
       await store.setThemeColor(ThemeColor.violet);
       await store.setAutoExport(true);
-      await store.setShareUsage(false);
       final backup = await store.exportBackup();
       expect(backup, isNot(contains('stays-local')));
 
@@ -408,7 +454,6 @@ void main() {
       await store.setFollowSystemColor(true);
       await store.setThemeColor(ThemeColor.blue);
       await store.setAutoExport(false);
-      await store.setShareUsage(true);
       await store.importBackup(backup);
 
       final restarted = await restartStore(store);
@@ -418,7 +463,6 @@ void main() {
       expect(restarted.followSystemColor, isFalse);
       expect(restarted.themeColor, ThemeColor.violet);
       expect(restarted.autoExport, isTrue);
-      expect(restarted.shareUsage, isFalse);
       expect(restarted.preferences.getString('plugin_secret'), 'stays-local');
     });
 

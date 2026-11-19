@@ -4,9 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../../playback_preferences.dart';
+import '../../playback_engine.dart';
 import '../../playback_session.dart';
 import '../app_scope.dart';
 import '../settings/sorani_account_view.dart';
@@ -81,7 +81,7 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
   double? _seekValue;
   double? _seekTarget;
   Timer? _seekTimer;
-  Player? _bound;
+  EnginePlayer? _bound;
 
   PlaybackSession get _session => widget.handle.session;
 
@@ -1133,7 +1133,7 @@ class PlaybackProgressBuilder extends StatefulWidget {
     required this.builder,
     this.active = true,
   });
-  final Player player;
+  final EnginePlayer player;
   final WidgetBuilder builder;
   final bool active;
 

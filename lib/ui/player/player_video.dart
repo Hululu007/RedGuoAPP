@@ -5,7 +5,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
 
+import '../../playback_engine.dart';
 import '../../playback_preferences.dart';
 import '../../playback_session.dart';
 import 'playback_handle.dart';
@@ -18,23 +20,15 @@ class PlayerVideo extends StatelessWidget {
     this.fit = VideoFit.auto,
   });
   final PlaybackHandle handle;
-  final Player player;
+  final EnginePlayer player;
   final VideoFit fit;
 
   @override
   Widget build(BuildContext context) {
-    final controller = handle.video(player);
-    final video = Video(
-      controller: controller,
-      controls: NoVideoControls,
-      fill: Colors.black,
-      fit: BoxFit.fill,
-      pauseUponEnteringBackgroundMode: false,
-    );
     final ratio = MediaQuery.devicePixelRatioOf(context);
     return ColoredBox(
       color: Colors.black,
-      child: StreamBuilder(
+      child: StreamBuilder<VideoParams>(
         stream: player.stream.videoParams,
         initialData: player.state.videoParams,
         builder: (context, snapshot) => LayoutBuilder(
@@ -50,15 +44,18 @@ class PlayerVideo extends StatelessWidget {
                 maxWidth: size.width,
                 minHeight: size.height,
                 maxHeight: size.height,
-                child: video,
+                child: _Surface(player: player),
               ),
             );
             final output = size * ratio;
-            if (!Platform.isWindows || !output.isFinite || output.isEmpty) {
+            if (!player.isMpv ||
+                !Platform.isWindows ||
+                !output.isFinite ||
+                output.isEmpty) {
               return sized;
             }
             return _OutputSize(
-              controller: controller,
+              controller: player.mpvVideo,
               box: output,
               child: sized,
             );
@@ -66,6 +63,30 @@ class PlayerVideo extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _Surface extends StatelessWidget {
+  const _Surface({required this.player});
+
+  final EnginePlayer player;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = player.exoVideo;
+    if (controller != null && controller.value.isInitialized) {
+      return VideoPlayer(controller);
+    }
+    if (player.isMpv) {
+      return Video(
+        controller: player.mpvVideo,
+        controls: NoVideoControls,
+        fill: Colors.black,
+        fit: BoxFit.fill,
+        pauseUponEnteringBackgroundMode: false,
+      );
+    }
+    return const SizedBox.expand();
   }
 }
 
