@@ -27,9 +27,9 @@ flutter = shutil.which('flutter')
 if not flutter:
     raise SystemExit('请先将 Flutter SDK 的 bin 目录加入 PATH。')
 abi_args = [item for abi in options.abi or [] for item in ['--abi', abi]]
-# 内置站源：构建前从 RedGuoAPI 精简包（index.json + modules/）拉全部模块，
-# 按索引版本校验后写入 bundled-modules/。拉不到时沿用本地已有副本，避免网络抖动把整次构建带崩。
-subprocess.run([sys.executable, str(root / 'scripts' / 'fetch_module.py'), '--offline-ok'],
+# 内置站源：正式 APK 只内置红果（hongguo），其他站源由用户按需安装。
+# 拉取失败时仅允许沿用本地红果副本，避免旧模块残留进安装包。
+subprocess.run([sys.executable, str(root / 'scripts' / 'fetch_module.py'), '--id', 'hongguo', '--offline-ok'],
                cwd=root, env=env, check=True)
 # 精简包里的模块全部内置，hongguo 排第一；没拉到任何模块时跳过 --bundle。
 bundle_root = root / 'bundled-modules'
