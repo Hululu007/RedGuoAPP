@@ -189,9 +189,9 @@ jobs:
           KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "::warning::未配置签名密钥，本次产物为 debug 签名，无法覆盖已装的正式版"
-            exit 0
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::正式发布必须配置完整的正式签名密钥，禁止使用 debug 签名发布"
+            exit 1
           fi
           printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/release.jks"
           {
@@ -200,7 +200,11 @@ jobs:
             echo "ANDROID_KEY_ALIAS=${KEY_ALIAS}"
             echo "ANDROID_KEY_PASSWORD=${KEY_PASSWORD}"
           } >> "$GITHUB_ENV"
-          echo "签名文件已就绪"
+          keytool -exportcert -alias "$KEY_ALIAS" -keystore "$RUNNER_TEMP/release.jks" \
+            -storepass "$KEYSTORE_PASSWORD" -file "$RUNNER_TEMP/signing-cert.der"
+          cert_sha256=$(sha256sum "$RUNNER_TEMP/signing-cert.der" | awk '{print $1}')
+          echo "SIGNING_CERT_SHA256=$cert_sha256" >> "$GITHUB_ENV"
+          echo "正式签名证书指纹已生成：$cert_sha256"
 
       # ---------- 构建 ----------
       - name: 构建并重命名产物
@@ -226,7 +230,7 @@ jobs:
         env:
           NAME: ${{ steps.ver.outputs.name }}
           CODE: ${{ steps.ver.outputs.code }}
-          EXPECTED_CERT: ${{ vars.SIGNING_CERT_SHA256 }}
+          EXPECTED_CERT: ${{ env.SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n1)
@@ -247,17 +251,17 @@ jobs:
           check "dist/android/RedGuo-${NAME}-v7a.apk" armeabi-v7a
           check "dist/android/RedGuo-${NAME}-v8a.apk" arm64-v8a
 
-          if [ -n "${EXPECTED_CERT:-}" ]; then
-            APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
-            expected=$(printf '%s' "$EXPECTED_CERT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
-            for apk in dist/android/*.apk; do
-              "$APKSIGNER" verify --print-certs "$apk" 2>&1 | tr -d ':' | tr '[:upper:]' '[:lower:]' | grep -q "$expected" \
-                || { echo "::error::$(basename "$apk") 签名证书不匹配"; exit 1; }
-            done
-            echo "签名证书校验通过"
-          else
-            echo "::warning::未设置仓库变量 SIGNING_CERT_SHA256，跳过证书校验"
-          fi
+          [ -n "${EXPECTED_CERT:-}" ] || { echo "::error::未能生成正式签名证书指纹"; exit 1; }
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
+          expected=$(printf '%s' "$EXPECTED_CERT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
+          for apk in dist/android/*.apk; do
+            actual=$("$APKSIGNER" verify --print-certs "$apk" 2>&1 \
+              | sed -n 's/.*certificate SHA-256 digest: //p' | head -n1 \
+              | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+            [ -n "$actual" ] && [ "$actual" = "$expected" ] \
+              || { echo "::error::$(basename "$apk") 签名证书不匹配（expected=$expected actual=$actual）"; exit 1; }
+          done
+          echo "所有 APK 的正式签名证书校验通过"
 
       - name: 保存构建产物
         uses: actions/upload-artifact@v4
@@ -314,6 +318,7 @@ jobs:
           NAME: ${{ steps.ver.outputs.name }}
           CODE: ${{ steps.ver.outputs.code }}
           TAG: ${{ steps.ver.outputs.tag }}
+          CERT_SHA256: ${{ env.SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -347,9 +352,14 @@ jobs:
                   ],
               }
 
+          cert_sha256 = os.environ.get('CERT_SHA256', '').strip().lower()
+          if not re.fullmatch(r'[0-9a-f]{64}', cert_sha256):
+              raise SystemExit('正式签名证书指纹缺失或格式错误，拒绝生成更新清单')
+
           manifest = {
               'schema': 1,
               'packageName': os.environ['PACKAGE_NAME'],
+              'signingCertSha256': cert_sha256,
               'version': '%s+%s' % (name, code),
               'versionCode': int(code),
               'versionName': name,
