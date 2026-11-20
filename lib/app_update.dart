@@ -60,7 +60,7 @@ class AppUpdate {
     required this.versionCode,
     required this.tag,
     required this.url,
-    required this.signingCertSha256,
+    this.signingCertSha256 = '',
     this.notes = '',
     this.apks = const [],
   });
