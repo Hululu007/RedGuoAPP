@@ -20,6 +20,8 @@ import '../widgets/focus_ring.dart';
 import '../widgets/form_text_field.dart';
 import '../widgets/group_card.dart';
 
+const _moduleNetworkError = '当前网络不畅，请稍后再试';
+
 class ModulesPage extends StatefulWidget {
   const ModulesPage({super.key, required this.store});
   final LocalStore store;
@@ -122,7 +124,7 @@ class _ModulesPageState extends State<ModulesPage>
         });
       }
     } catch (failure) {
-      if (mounted) setState(() => _error = '$failure');
+      if (mounted) setState(() => _error = _moduleNetworkError);
     }
   }
 
@@ -139,7 +141,7 @@ class _ModulesPageState extends State<ModulesPage>
       setState(() => _index = index);
       unawaited(_autoUpdate(index));
     } catch (failure) {
-      if (mounted) setState(() => _indexError = '$failure');
+      if (mounted) setState(() => _indexError = _moduleNetworkError);
     }
   }
 
@@ -165,7 +167,7 @@ class _ModulesPageState extends State<ModulesPage>
     try {
       await work();
     } catch (failure) {
-      _show('$failure');
+      _show(_moduleNetworkError);
     } finally {
       if (mounted) setState(() => _busy = false);
       await _refresh();
@@ -415,7 +417,7 @@ class _ModulesPageState extends State<ModulesPage>
       onUpdate: enabled ? () => _installIndexed(latest[module.id]!) : null,
       onUninstall: enabled ? () => _uninstall(module) : null,
     );
-    final header = [if (_error case final error?) _Note(error)];
+    final header = [if (_error case final error?) _Note(_moduleNetworkError)];
     if (modules != null &&
         modules.length > 1 &&
         _store.profile.admin &&
@@ -438,7 +440,9 @@ class _ModulesPageState extends State<ModulesPage>
     final enabled = _canInstall;
     final installed = {for (final module in _modules ?? const []) module.id};
     final missing = _missingSources(_store, _repository);
-    final warning = bundled ? '' : _index?.warning ?? '';
+    final warning = bundled || (_index?.warning ?? '').isEmpty
+        ? ''
+        : _moduleNetworkError;
     final listed = [
       for (final entry in _index?.entries ?? const <ModuleIndexEntry>[])
         if (entry.bundled == bundled) entry,
@@ -891,7 +895,7 @@ class _InstalledCard extends StatelessWidget {
       id: module.id,
       body: [
         if (module.error.isNotEmpty)
-          Text(module.error, style: TextStyle(color: colors.error))
+          Text(_moduleNetworkError, style: TextStyle(color: colors.error))
         else ...[
           if (module.description.isNotEmpty) Text(module.description),
           if (update case final update?)
