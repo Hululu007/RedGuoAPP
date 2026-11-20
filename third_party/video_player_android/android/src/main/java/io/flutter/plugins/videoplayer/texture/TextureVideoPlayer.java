@@ -13,10 +13,10 @@ import androidx.annotation.VisibleForTesting;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultLoadControl;
-import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import io.flutter.plugins.videoplayer.DecoderPreference;
 import io.flutter.plugins.videoplayer.ExoPlayerEventListener;
+import io.flutter.plugins.videoplayer.PlaybackRenderersFactory;
 import io.flutter.plugins.videoplayer.VideoAsset;
 import io.flutter.plugins.videoplayer.VideoPlayer;
 import io.flutter.plugins.videoplayer.VideoPlayerCallbacks;
@@ -61,8 +61,8 @@ public final class TextureVideoPlayer extends VideoPlayer implements SurfaceProd
         () -> {
           // 开启解码器回退：硬件解码器初始化失败时自动尝试系统软解，
           // 避免低端电视盒子上 HEVC 直接报 MediaCodecVideoRenderer error。
-          DefaultRenderersFactory renderersFactory =
-              new DefaultRenderersFactory(context).setEnableDecoderFallback(true);
+          // 同时把片源里写过头的 HEVC 等级夹到设备支持范围，防止硬解 start failed。
+          PlaybackRenderersFactory renderersFactory = new PlaybackRenderersFactory(context);
           if (DecoderPreference.softwareOnly) {
             renderersFactory.setMediaCodecSelector(DecoderPreference.SOFTWARE_ONLY);
           }
