@@ -159,6 +159,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            pubspec.lock
+            android/*.gradle*
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
 
       - name: 安装 Python
         uses: actions/setup-python@v5
@@ -174,10 +180,9 @@ jobs:
       - name: 安装 NDK
         run: sdkmanager "ndk;${NDK_VERSION}"
 
-      - name: 准备依赖
+      - name: 准备 Go 依赖
         run: |
           set -euo pipefail
-          flutter pub get
           (cd native && go mod download)
 
       # ---------- 签名 ----------
