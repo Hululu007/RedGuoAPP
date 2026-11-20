@@ -370,9 +370,6 @@ jobs:
           }
           payload = json.dumps(manifest, ensure_ascii=False, indent=2) + '\n'
           (dist / 'update.json').write_text(payload, encoding='utf-8')
-          # 同一份内容再存一份 latest.json：与 hongguoTV 的发布结构保持一致，
-          # 也给只认 latest.json 的旧工具留个入口。
-          (dist / 'latest.json').write_text(payload, encoding='utf-8')
           print(payload)
           PY
 
@@ -392,7 +389,7 @@ jobs:
           fi
           gh release create "$TAG" \
             dist/android/*.apk dist/android/SHA256SUMS \
-            dist/android/update.json dist/android/latest.json \
+            dist/android/update.json \
             --repo "$GH_RELEASE_REPO" \
             --title "红果剧场正式版 ${NAME}" \
             --notes-file "$RUNNER_TEMP/notes.md"
