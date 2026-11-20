@@ -60,6 +60,7 @@ class AppUpdate {
     required this.versionCode,
     required this.tag,
     required this.url,
+    required this.signingCertSha256,
     this.notes = '',
     this.apks = const [],
   });
@@ -71,6 +72,8 @@ class AppUpdate {
 
   /// 发布页地址，仅用于「用浏览器打开」。
   final String url;
+  /// 正式发布 APK 的签名证书 SHA-256（64 位十六进制）。
+  final String signingCertSha256;
   final String notes;
   final List<AppUpdateApk> apks;
 
@@ -105,6 +108,72 @@ class AppUpdate {
         manifestTag is String &&
         manifestTag.isNotEmpty &&
         manifestTag != tag) {
+      return null;
+    }
+
+    final cert = data['signingCertSha256'];
+    if (cert is! String ||
+        !RegExp(r'^[0-9a-fA-F]{64}
+      for (final item in items) {
+        final apk = AppUpdateApk.fromJson(item);
+        if (apk != null) apks.add(apk);
+      }
+    }
+    if (apks.isEmpty) {
+      // 兼容只写单个 apk 的旧清单。
+      final single = AppUpdateApk.fromJson(data['apk']);
+      if (single != null) apks.add(single);
+    }
+    if (apks.isEmpty) return null;
+
+    final versionName = (data['versionName'] as String? ?? '').trim();
+    final version = (data['version'] as String? ?? '').trim();
+    final name = versionName.isNotEmpty
+        ? versionName
+        : version.split('+').first;
+    var code = _intValue(data['versionCode']);
+    if (code <= 0 && version.contains('+')) {
+      code = int.tryParse(version.split('+').last) ?? 0;
+    }
+    if (code <= 0) return null;
+
+    return AppUpdate(
+      version: name,
+      versionCode: code,
+      tag: effectiveTag,
+      url: 'https://github.com/$updateGitHubRepo/releases/tag/$effectiveTag',
+      signingCertSha256: cert.trim().toLowerCase(),
+      notes: _clip(data['notes'] as String? ?? ''),
+      apks: apks,
+    );
+  }
+
+  /// 更新说明只留摘要，太长会拖慢弹窗。
+  static String _clip(String text) {
+    final trimmed = text.trim();
+    return trimmed.length <= 2000 ? trimmed : '${trimmed.substring(0, 2000)}…';
+  }
+}
+
+/// 当前安装的版本名，用于界面展示。
+Future<String> currentAppVersion() async {
+  final info = await PackageInfo.fromPlatform();
+  return info.version;
+}
+
+/// 当前安装的内部版本号，用于判断是否需要更新。
+Future<int> currentVersionCode() async {
+  final info = await PackageInfo.fromPlatform();
+  return int.tryParse(info.buildNumber.trim()) ?? 0;
+}
+
+int _intValue(Object? value) => switch (value) {
+  final int number => number,
+  final double number => number.toInt(),
+  final String text => int.tryParse(text.trim()) ?? 0,
+  _ => 0,
+};
+).hasMatch(cert.trim())) {
       return null;
     }
 
