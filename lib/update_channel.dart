@@ -19,7 +19,7 @@ extension UpdateChannelInfo on UpdateChannel {
   };
 
   String get hint => switch (this) {
-    UpdateChannel.auto => '优先国内，取不到新版再问直连与代理',
+    UpdateChannel.auto => '自动选择最快的线路',
     UpdateChannel.domestic => 'GitCode 国内直连，速度最快',
     UpdateChannel.direct => 'GitHub 官方地址，海外网络或已开代理时使用',
     UpdateChannel.proxy => 'GitHub 走公共加速，直连打不开时使用',
