@@ -185,6 +185,7 @@ Future<void> _applyUpdate(
 
 Future<bool> _matchesUpdateSignature(AppUpdate update) async {
   try {
+    if (update.signingCertSha256.isEmpty) return false;
     final installed = await UpdateDownload.signingCertificateSha256();
     return installed == update.signingCertSha256;
   } catch (_) {
