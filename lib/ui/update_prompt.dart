@@ -31,6 +31,7 @@ Future<void> runStartupChecks(BuildContext context, LocalStore store) async {
     if (!store.checkUpdates) return;
     final latest = await repository.checkUpdate();
     if (latest == null) return;
+    if (!await _matchesUpdateSignature(latest)) return;
     update = latest;
   } catch (_) {
     return;
@@ -78,6 +79,14 @@ Future<void> checkUpdateManually(BuildContext context, LocalStore store) async {
   }
   if (update == null) {
     messenger.showSnackBar(const SnackBar(content: Text('已是最新版本')));
+    return;
+  }
+  if (!await _matchesUpdateSignature(update)) {
+    if (context.mounted) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('更新签名不匹配，已拒绝此次更新')),
+      );
+    }
     return;
   }
   if (!context.mounted) return;
@@ -172,6 +181,15 @@ Future<void> _applyUpdate(
   );
   if (file == null || !context.mounted) return;
   await _installPackage(context, file);
+}
+
+Future<bool> _matchesUpdateSignature(AppUpdate update) async {
+  try {
+    final installed = await UpdateDownload.signingCertificateSha256();
+    return installed == update.signingCertSha256;
+  } catch (_) {
+    return false;
+  }
 }
 
 Future<void> _installPackage(BuildContext context, File file) async {
