@@ -144,7 +144,10 @@ class AppUpdate {
       tag: effectiveTag,
       url: 'https://github.com/$updateGitHubRepo/releases/tag/$effectiveTag',
       signingCertSha256: cert is String &&
-              RegExp(r'^[0-9a-fA-F]{64}
+              cert.trim().length == 64 &&
+              RegExp(r'^[0-9a-fA-F]{64}').hasMatch(cert.trim())
+          ? cert.trim().toLowerCase()
+          : '',
       notes: _clip(data['notes'] as String? ?? ''),
       apks: apks,
     );
