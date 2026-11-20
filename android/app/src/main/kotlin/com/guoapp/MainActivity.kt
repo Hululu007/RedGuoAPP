@@ -606,7 +606,7 @@ class MainActivity : FlutterActivity() {
                 PackageManager.GET_SIGNATURES
             ).signatures.orEmpty()
         }
-        val certificate = certificates.firstOrNull()
+        val certificate = certificates.lastOrNull()
             ?: throw IllegalStateException("签名证书不存在")
         return MessageDigest.getInstance("SHA-256")
             .digest(certificate.toByteArray())
