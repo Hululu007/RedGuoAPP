@@ -184,6 +184,7 @@ Future<void> _applyUpdate(
 }
 
 Future<bool> _matchesUpdateSignature(AppUpdate update) async {
+  if (!Platform.isAndroid) return true;
   try {
     if (update.signingCertSha256.isEmpty) return false;
     final installed = await UpdateDownload.signingCertificateSha256();
