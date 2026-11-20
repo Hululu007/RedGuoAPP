@@ -50,6 +50,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.videoplayer.DecoderPreference
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import kotlin.math.roundToInt
 
 private const val SURFACE_RESIZE_REDRAW_WAIT_MS = 100L
@@ -349,6 +350,11 @@ class MainActivity : FlutterActivity() {
                                 "abi" to installedAbi()
                             ))
                         }
+                        "appSigningCertSha256" -> {
+                            runCatching { appSigningCertSha256() }
+                                .onSuccess { result.success(it) }
+                                .onFailure { result.error("signing_certificate_unavailable", "无法读取应用签名证书", null) }
+                        }
                         "setDecoderMode" -> {
                             // 「解码方式」选软件解码时，ExoPlayer 只用系统软解。
                             DecoderPreference.softwareOnly =
@@ -577,6 +583,34 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
+    }
+
+    /** 返回当前安装包签名证书的 SHA-256 指纹。 */
+    @Suppress("DEPRECATION")
+    private fun appSigningCertSha256(): String {
+        val certificates = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val signingInfo = info.signingInfo
+                ?: throw IllegalStateException("签名信息不存在")
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_SIGNATURES
+            ).signatures.orEmpty()
+        }
+        val certificate = certificates.firstOrNull()
+            ?: throw IllegalStateException("签名证书不存在")
+        return MessageDigest.getInstance("SHA-256")
+            .digest(certificate.toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
     /**
