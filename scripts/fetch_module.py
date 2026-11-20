@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """从 RedGuoAPI 的**精简包**（index.json + modules/）拉取内置站源，写入 bundled-modules/。
 
-默认拉取精简索引里的全部模块，hongguo 排在第一个；--id 可只拉指定模块。
+默认只拉取 hongguo；--id 可显式指定需要内置的模块。正式构建只内置红果。
 精简索引不带 sha256，因此按索引声明的 version 与模块 manifest 逐一对齐校验，
 版本对不上说明 CDN 缓存串版，换下一个源重试；条目里有 sha256 时仍然严格校验。
 构建脚本在打包前调用，保证内置站源和线上发布一致，不用手工往仓库里塞副本。
@@ -57,15 +57,17 @@ def load_index():
 
 
 def select(entries, ids):
-    """没指定 id 时按精简索引顺序拉全部，只把 hongguo 提到最前。"""
+    """默认只选择红果；显式指定 id 时仅选择指定模块。"""
     if ids:
         by_id = {item.get('id'): item for item in entries}
         missing = [i for i in ids if i not in by_id]
         if missing:
             raise SystemExit('索引里没有模块 %s' % '、'.join(missing))
         return [by_id[i] for i in ids]
-    return [item for _, item in sorted(
-        enumerate(entries), key=lambda pair: (pair[1].get('id') != PRIMARY, pair[0]))]
+    by_id = {item.get('id'): item for item in entries}
+    if PRIMARY not in by_id:
+        raise SystemExit('精简索引里没有红果内置源 hongguo')
+    return [by_id[PRIMARY]]
 
 
 def download(entry, name):
@@ -118,7 +120,7 @@ def prune(dest_root, keep):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--id', action='append', default=[],
-                        help='只拉指定模块，可多次指定；默认拉精简包全部模块')
+                        help='只拉指定模块，可多次指定；默认只拉红果 hongguo')
     parser.add_argument('--dest', default='bundled-modules',
                         help='输出目录，默认 bundled-modules')
     parser.add_argument('--offline-ok', action='store_true',
@@ -133,9 +135,12 @@ def main():
     try:
         index = load_index()
     except SystemExit as exc:
-        ready = bool(options.id) and all((dest_root / i / 'main.js').is_file() for i in options.id)
-        if options.offline_ok and (not options.id or ready):
-            print('索引不可用，沿用已有模块：%s' % exc, flush=True)
+        keep = set(options.id or [PRIMARY])
+        ready = all((dest_root / i / 'main.js').is_file() and
+                    (dest_root / i / 'manifest.json').is_file() for i in keep)
+        if options.offline_ok and ready:
+            print('索引不可用，仅沿用已有红果内置源：%s' % exc, flush=True)
+            prune(dest_root, keep)
             return
         raise
 
