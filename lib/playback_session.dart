@@ -5,7 +5,9 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:video_player/video_player.dart';
 
+import 'app_device.dart';
 import 'core_bridge.dart';
 import 'danmaku_controller.dart';
 import 'danmaku_style.dart';
@@ -67,6 +69,8 @@ class PlaybackSession extends ChangeNotifier {
     unawaited(_player.setVolume(_unmutedVolume));
     _loader = PlaybackLoader(repository);
     _preloader = PlaybackPreloader(repository)..addListener(_prime);
+    // 「预开下一集」是用户明确控制的开关，关掉就完全不预加载。
+    unawaited(_syncPreloadSetting());
     danmaku = DanmakuController(repository)
       ..setEnabled(_danmakuEnabled)
       ..setMergeWindow(preferences.danmakuMerge)
@@ -190,6 +194,10 @@ class PlaybackSession extends ChangeNotifier {
   EnginePlayer _player;
   EnginePlayer? _standby;
   Future<void>? _standbyOpening;
+  /// 是否已经尝试过让 MPV 关掉硬解，避免反复重试同一集。
+  bool _mpvCopyRetry = false;
+  /// 设置里的「预开下一集」是否开启。关闭后完全不预加载。
+  bool _preloadEnabled = true;
   late final DanmakuController danmaku;
   late final PlaybackLoader _loader;
   late final PlaybackPreloader _preloader;
@@ -257,6 +265,16 @@ class PlaybackSession extends ChangeNotifier {
 
   EnginePlayer? get standby => _standbyOpen ? _standby : null;
   int get standbyIndex => _standbyOpen ? _standbyIndex : -1;
+
+  /// 预热那一路的 Exo 控制器。
+  ///
+  /// 平台视图模式下解码器必须拿到真实的画面表面才会真正开始解码，所以预热的那一路
+  /// 也要把平台视图建出来（放在不可见的位置），否则预热只是建了个解码器实例，
+  /// 切集时照样要重新等首帧。
+  ///
+  /// 只在正在预热下一集时给出：切集后旧播放器会变成 standby，那一路不需要再预热。
+  VideoPlayerController? get standbyExoVideo =>
+      _standbyIndex >= 0 ? _standby?.exoVideo : null;
   int get index => _index;
   Episode get episode => detail.episodes[_index];
   bool get loading => _loading;
@@ -376,6 +394,8 @@ class PlaybackSession extends ChangeNotifier {
 
   void _syncMedia() {
     if (_closed) return;
+    // 设置变了，「预开下一集」开关可能也变了。
+    unawaited(_syncPreloadSetting());
     final controls = MediaControls.instance;
     if (!_backgroundPlayback || !_engaged || !_usable || store.locked) {
       controls.release(this);
@@ -464,6 +484,22 @@ class PlaybackSession extends ChangeNotifier {
     durationMs: player.state.duration.inMilliseconds,
   );
 
+  /// 同步设置里的「预开下一集」开关。
+  ///
+  /// 关掉时立刻停掉已有的预加载并释放备用播放器；打开时从下一轮同步开始预加载。
+  Future<void> _syncPreloadSetting() async {
+    if (_closed) return;
+    final television = await AppDevice.isTelevisionDevice();
+    if (_closed) return;
+    final enabled = store.playbackPreferences.preopens(television: television);
+    if (_preloadEnabled == enabled) return;
+    _preloadEnabled = enabled;
+    if (!enabled) {
+      _preloader.clear();
+      _dropStandby();
+    }
+  }
+
   void _syncPreload() {
     if (_closed) return;
     if (!_foreground ||
@@ -477,19 +513,40 @@ class PlaybackSession extends ChangeNotifier {
       _preloader.clear();
       return;
     }
+    // 设置里的「预开下一集」关掉就完全不预加载：既不取下一集的播放地址，也不留备用
+    // 播放器，切集时现取地址（会慢一点，但省内存和电量）。
+    if (!_preloadEnabled) {
+      _preloader.clear();
+      _dropStandby();
+      return;
+    }
     final state = player.state;
     final duration = state.duration.inMilliseconds;
     final position = state.position.inMilliseconds;
     final ahead = state.buffer.inMilliseconds - position;
+    if (duration <= 0 || ahead < 3000) {
+      return;
+    }
     if (_standby != null) {
       if (_standbyOpen &&
           DateTime.now().difference(_standbyAt) > const Duration(minutes: 8)) {
         _dropStandby();
       }
-      if (_standbyIndex >= 0 ||
-          duration <= 0 ||
-          duration - position > _preloadLead ||
-          ahead < 3000) {
+      if (_standbyIndex >= 0) {
+        // 备用播放器已经在预热下一集，不用再管地址。
+        return;
+      }
+      // 备用播放器要开一整路解码，占资源重，等本集快结束再开。
+      // 但取下一集的播放地址很轻，开播几秒后就该做，用户手动切集才不用现取。
+      if (duration - position > _preloadLead) {
+        if (position >= 2000 && state.playing && !state.buffering) {
+          _preloader.prepare(
+            detail.drama,
+            detail.episodes[_index + 1],
+            quality: _quality,
+            online: _online,
+          );
+        }
         return;
       }
     } else {
@@ -497,10 +554,9 @@ class PlaybackSession extends ChangeNotifier {
         _preloader.pause();
         return;
       }
-      if (duration <= 0 ||
-          position < 2000 ||
-          (position < duration ~/ 2 && duration - position > 45000) ||
-          ahead < 5000) {
+      // 预加载要尽早开始。短剧一集两三分钟，如果等到播过一半才准备，用户在前半段
+      // 手动切集就一定赶不上，每次都得现取播放地址（实测 1~4 秒）。
+      if (position < 2000) {
         return;
       }
     }
@@ -519,7 +575,38 @@ class PlaybackSession extends ChangeNotifier {
       unawaited(_fallbackToMpv('解码器不可用'));
       return;
     }
+    // MPV 的硬解在个别设备/片源上会起不来，这时先关掉硬解用软解再试一次，
+    // 而不是直接放弃播放。降级只针对当前这一集，换集后会恢复硬解。
+    if (_player.isMpv && !_mpvCopyRetry) {
+      unawaited(_retryMpvWithCopy('硬解不可用'));
+      return;
+    }
     _queueRecovery('player_error');
+  }
+
+  /// MPV 硬解不可用时关掉硬解改用软解重试当前这一集。
+  /// MPV 硬解不可用时用软解重试当前这一集。
+  ///
+  /// 只影响当前这一集：换集之后会重新按设置恢复硬解，不会一路软解下去。
+  Future<void> _retryMpvWithCopy(String reason) async {
+    if (_closed || _mpvCopyRetry) return;
+    _mpvCopyRetry = true;
+    final plan = _plan;
+    final position = currentPosition;
+    DiaryService.add(
+      '[Play] MPV $reason，改用软解重试（${position.toStringAsFixed(1)}s）',
+    );
+    // vo 与 hwdec 是视频输出创建时的属性，运行时改不动，要靠重建输出控制器。
+    await player.downgradeMpvHwdec();
+    if (_closed || plan == null) return;
+    await play(
+      _index,
+      position: position,
+      recovery: PlaybackRecoveryAction.kernel,
+      reuse: plan,
+    );
+    // 这一集过去了，恢复硬解，下一集还按设置来。
+    _mpvCopyRetry = false;
   }
 
   void _completed(bool completed) {
@@ -759,6 +846,8 @@ class PlaybackSession extends ChangeNotifier {
     _errorTimer?.cancel();
     _pendingError = false;
     _player = EnginePlayer.open(kernel: PlaybackKernel.mpv);
+    // 新内核要能重新尝试硬解，不继承上一个内核的降级状态。
+    _mpvCopyRetry = false;
     _bind();
     unawaited(previous.dispose());
     unawaited(standby?.dispose());
@@ -814,7 +903,12 @@ class PlaybackSession extends ChangeNotifier {
       _ when Platform.isMacOS => 'auto-safe',
       _ => null,
     };
-    if (hwdec != null) await platform.setProperty('hwdec', hwdec);
+    // 硬解方式统一交给内核决定，播放层和视频输出用同一个值：视频输出创建时会按
+    // 自己的配置重新设置 hwdec，两边不一致的话以视频输出为准，用户在设置里选的
+    // 「解码方式」就会被盖回去。
+    target.setMpvHwdec(hwdec);
+    final effective = target.mpvHwdec;
+    if (effective != null) await platform.setProperty('hwdec', effective);
     if (Platform.isAndroid) {
       await platform.setProperty('hwdec-codecs', 'all');
       await platform.setProperty('vd-lavc-skiploopfilter', 'nonkey');
@@ -854,6 +948,12 @@ class PlaybackSession extends ChangeNotifier {
     _staleAudio = false;
     _cancelResumeWatchdog();
     if (index != _index) _online = false;
+    // 上一集因为硬解起不来而临时降级过软解，换集后恢复硬解。
+    // 硬解能不能用是逐个片源的事，不能因为一集失败就一路软解下去。
+    if (recovery != PlaybackRecoveryAction.kernel) {
+      _mpvCopyRetry = false;
+      await player.restoreMpvHwdec();
+    }
     if (recovery == null &&
         position == 0 &&
         _standbyIndex == index &&
@@ -907,6 +1007,10 @@ class PlaybackSession extends ChangeNotifier {
     PlaybackPlan? prepared;
     PlaybackPlan? retained;
     var installed = false;
+    // 记录各阶段耗时：切集等待时间长时，能从日记看出是取地址慢、还是播放器初始化慢。
+    final stopwatch = Stopwatch()..start();
+    var markAddress = 0;
+    var markOpen = 0;
     try {
       await _serialize(() async {
         if (!_current(ticket)) return;
@@ -936,6 +1040,7 @@ class PlaybackSession extends ChangeNotifier {
               online: _online,
             );
       if (prepared == null) return;
+      markAddress = stopwatch.elapsedMilliseconds;
       final plan = prepared;
       await _serialize(() async {
         if (!_current(ticket)) {
@@ -958,16 +1063,24 @@ class PlaybackSession extends ChangeNotifier {
               : null,
           play: _foreground && _playIntent,
         );
+        markOpen = stopwatch.elapsedMilliseconds;
         if (!_current(ticket)) return;
         _openedIndex = index;
         _health.reset();
         await _setRate(_rate);
         if (!_current(ticket)) return;
         await _ensurePlaying();
+        await _reportDecoderDiagnostics();
         _loading = false;
         _notify();
         danmaku.setPlan(plan);
         _syncDanmaku();
+        // 切集等待时间长时，从这里能看出慢在取播放地址还是播放器初始化。
+        DiaryService.add(
+          '[Play] 第 ${index + 1} 集打开耗时 ${stopwatch.elapsedMilliseconds}ms'
+          '（取地址 ${markAddress}ms，播放器 ${markOpen - markAddress}ms，'
+          '预加载${warmed != null ? '已命中' : '未命中'}）',
+        );
       });
     } catch (error) {
       if (_player.isExo && _plan != null && isDecoderFailure('$error')) {
@@ -1291,6 +1404,46 @@ class PlaybackSession extends ChangeNotifier {
       await player.play();
     } catch (error) {
       DiaryService.add('[Play] 打开后自动播放失败：${_diagnostic(error)}');
+    }
+  }
+
+  /// 把原生侧的解码器诊断写进播放诊断日记。
+  ///
+  /// 硬解初始化失败时 ExoPlayer 会静默回退软解，应用层完全感知不到失败原因，
+  /// 只有原生侧记录下来的信息能说明到底是设备没有硬解，还是选中了硬解但初始化失败。
+  Future<void> _collectDecoderDiagnostics() async {
+    final lines = await AppDevice.takeDecoderDiagnostics();
+    if (lines.isEmpty) return;
+    // 开头补一句当前播放的基本信息，方便对照着看。
+    final params = player.state.videoParams;
+    final size = videoDisplaySize(params);
+    final resolution = size == null
+        ? '分辨率未知'
+        : '${size.width.round()}x${size.height.round()}';
+    DiaryService.add(
+      '[Video] 播放信息：内核=${player.kernel.label} 分辨率=$resolution',
+    );
+    for (final line in lines) {
+      DiaryService.add('[Video] $line');
+    }
+  }
+
+  /// 播放地址打开后收集一次解码器诊断。
+  ///
+  /// 单独成一步而不是挂在自动播放里：自动播放可能被用户手动点击抢先，或本来就已在
+  /// 播放，诊断就永远拉不到，日记里也就看不到真实解码情况。
+  Future<void> _reportDecoderDiagnostics() async {
+    if (_closed) return;
+    try {
+      await _collectDecoderDiagnostics();
+      // 解码器是在轨道选定之后才初始化的，第一轮诊断可能还没产生信息。
+      // 隔一小段时间再取一次，把真正跑起来的解码器记下来。
+      if (_closed) return;
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (_closed) return;
+      await _collectDecoderDiagnostics();
+    } catch (_) {
+      // 诊断信息拿不到不影响播放。
     }
   }
 
@@ -1713,11 +1866,13 @@ class PlaybackSession extends ChangeNotifier {
     if (standbyPlan != null) unawaited(_release(standbyPlan.session));
     final standby = _standby;
     unawaited(_loader.close().catchError((Object _) {}));
+    // 播放器要立刻释放，不能排在操作队列后面：打开流程可能正卡在等网络或等解码器，
+    // 那样解码器和画面表面会一直被占着，退出播放页后连详情页都变慢。
+    unawaited(player.dispose());
+    unawaited(standby?.dispose());
     unawaited(
       _operations.catchError((Object _) {}).then((_) async {
         await _rates.catchError((Object _) {});
-        await player.dispose();
-        await standby?.dispose();
       }),
     );
     super.dispose();

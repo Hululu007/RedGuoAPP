@@ -11,9 +11,9 @@ import androidx.annotation.VisibleForTesting;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultLoadControl;
-import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import io.flutter.plugins.videoplayer.DecoderPreference;
+import io.flutter.plugins.videoplayer.PlaybackRenderersFactory;
 import io.flutter.plugins.videoplayer.ExoPlayerEventListener;
 import io.flutter.plugins.videoplayer.VideoAsset;
 import io.flutter.plugins.videoplayer.VideoPlayer;
@@ -59,10 +59,10 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
         asset.getMediaItem(),
         options,
         () -> {
-          // 开启解码器回退：硬件解码器初始化失败时自动尝试系统软解，
-          // 避免低端电视盒子上 HEVC 直接报 MediaCodecVideoRenderer error。
-          DefaultRenderersFactory renderersFactory =
-              new DefaultRenderersFactory(context).setEnableDecoderFallback(true);
+          // 带解码器诊断的渲染器工厂：开启解码器回退（硬件解码器初始化失败时自动尝试系统
+          // 软解，避免低端电视盒子上 HEVC 直接报 MediaCodecVideoRenderer error），
+          // 同时把可用解码器、实际选中的解码器记进播放诊断日记。
+          PlaybackRenderersFactory renderersFactory = new PlaybackRenderersFactory(context);
           if (DecoderPreference.softwareOnly) {
             renderersFactory.setMediaCodecSelector(DecoderPreference.SOFTWARE_ONLY);
           }

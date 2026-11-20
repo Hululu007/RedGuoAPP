@@ -15,6 +15,17 @@ class AppDevice {
   static var _phoneMode = false;
   static var _orientation = PlayerOrientation.auto;
   static PlayerOrientation? _heldOrientation;
+  /// 设备形态判断结果（是否电视）。设备形态开机后不会变，判一次就够。
+  static bool? _televisionDevice;
+
+  /// 是否是电视/盒子等无触摸屏设备。判断结果会缓存。
+  static Future<bool> isTelevisionDevice() async {
+    final cached = _televisionDevice;
+    if (cached != null) return cached;
+    final device = await detect();
+    _televisionDevice = device.television;
+    return device.television;
+  }
 
   static Future<AppDevice> detect({
     AppDevice fallback = const AppDevice(),
@@ -55,6 +66,21 @@ class AppDevice {
     try {
       await channel.invokeMethod<void>('setDecoderMode', {'mode': mode});
     } catch (_) {}
+  }
+
+  /// 取走原生的解码器诊断信息：设备可用解码器、实际选中的解码器、初始化失败原因。
+  ///
+  /// 硬解初始化失败时 ExoPlayer 会静默回退软解，应用侧看不到失败原因，只能靠这些信息
+  /// 判断到底是设备没有硬解，还是选中了硬解但初始化失败。
+  static Future<List<String>> takeDecoderDiagnostics() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return const [];
+    try {
+      final lines =
+          await channel.invokeListMethod<String>('takeDecoderDiagnostics') ?? const [];
+      return lines.where((line) => line.trim().isNotEmpty).toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   static Future<bool> compatibleRendering() async {

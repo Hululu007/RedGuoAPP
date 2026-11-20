@@ -202,7 +202,12 @@ class AndroidVideoPlayer extends VideoPlayerPlatform {
 
     return switch (viewState) {
       VideoPlayerTextureViewState(:final int textureId) => Texture(textureId: textureId),
-      VideoPlayerPlatformViewState() => PlatformViewPlayer(playerId: playerId),
+      // key 必须带 playerId：切集时 ExoPlayer 是新实例，但页面结构不变，
+      // PlatformView 会被复用，而原生 PlatformVideoView 里捕获的是已释放的旧播放器，
+      // 新解码器绑不上 Surface 就只剩黑屏。带上 key 让 Flutter 重建整个平台视图，
+      // 原生侧才会重新创建视图并绑定当前播放器。
+      VideoPlayerPlatformViewState() =>
+        PlatformViewPlayer(key: ValueKey<int>(playerId), playerId: playerId),
     };
   }
 

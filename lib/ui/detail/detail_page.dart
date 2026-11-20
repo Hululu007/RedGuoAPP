@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../drama_details.dart';
 import '../../local_store.dart';
 import '../../models.dart';
+import '../../playback_preferences.dart';
 import '../app_scope.dart';
 import '../downloads/download_picker_page.dart';
 import '../player/playback_handle.dart';
@@ -324,6 +325,17 @@ class _DetailPageState extends State<DetailPage> {
         !mounted ||
         !_ready ||
         !details.allowed) {
+      return;
+    }
+    // 只给 MPV 预开播放器。MPV 初始化 libmpv 要几百毫秒，提前建好点播放时能省下这段；
+    // ExoPlayer 初始化只要十几毫秒（日志实测 17ms），预开省不了多少，却要一直占着
+    // 一个播放器实例和一份解码器资源，反而拖慢详情页本身。
+    final preferences = widget.store.playbackPreferences;
+    final kernel = preferences.playbackKernel == PlaybackKernel.exo &&
+            widget.store.exoDecoderBroken
+        ? PlaybackKernel.mpv
+        : preferences.playbackKernel;
+    if (kernel != PlaybackKernel.mpv) {
       return;
     }
     final index = details.resumeIndex;

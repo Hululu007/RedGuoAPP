@@ -11,7 +11,10 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  video_player: ^2.9.2
+  # 2.10.0 起 VideoPlayerController 支持 viewType 参数：ExoPlayer 可走
+  # PlatformView（SurfaceView 直通）渲染，与原生 Kotlin 版路径一致，
+  # 绕开 SurfaceTexture 在部分 32 位设备上硬解初始化失败的问题。
+  video_player: ^2.10.0
   ffi: ^2.2.0
   media_kit: 1.2.6
   media_kit_video: 2.0.1

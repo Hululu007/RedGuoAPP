@@ -361,6 +361,11 @@ class MainActivity : FlutterActivity() {
                                 call.argument<String>("mode") == "software"
                             result.success(null)
                         }
+                        "takeDecoderDiagnostics" -> {
+                            // 取走解码器诊断信息，供播放诊断日记显示：硬解初始化失败时
+                            // ExoPlayer 会静默回退软解，只有这里能看出真实原因。
+                            result.success(DecoderPreference.takeDiagnostics())
+                        }
                         "installUpdate" -> installUpdate(
                             call.argument<String>("path"),
                             result

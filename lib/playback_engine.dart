@@ -33,14 +33,31 @@ class EnginePlayer {
       ),
     );
   }
-
   /// 包装一个已有的 media_kit 播放器（测试或自定义场景使用）。
   factory EnginePlayer.wrap(Player player) => EnginePlayer._mpv(player);
 
   final Player? _mpv;
   final _ExoCore? _exo;
   VideoController? _video;
+  /// MPV 本次是否临时改用软解。硬解起不来时的临时降级，不影响后续剧集。
+  bool _mpvSoftwareOnly = false;
+  /// MPV 的硬解方式。
+  ///
+  /// 默认不指定，交给 media_kit 用平台默认（Android 上是 auto-safe，会自动挑选
+  /// 设备上真正可用的硬解后端）。硬指定某一个反而不稳——组合不合适时 mpv 会直接
+  /// 报「Could not open codec.」，然后一路退到软解。
+  String? _mpvHwdec;
   late final PlaybackKernel kernel;
+
+  /// 当前应使用的 MPV 硬解方式。null 表示用平台默认。
+  String? get mpvHwdec => _mpvSoftwareOnly ? 'no' : _mpvHwdec;
+
+  /// 设置 MPV 的硬解方式。null 表示用平台默认（自动挑选）。
+  void setMpvHwdec(String? value) {
+    if (_mpvHwdec == value) return;
+    _mpvHwdec = value;
+    _video = null;
+  }
 
   bool get isMpv => _mpv != null;
   bool get isExo => _exo != null;
@@ -55,7 +72,51 @@ class EnginePlayer {
 
   /// 视频输出控制器（MPV 内核）。按需创建，避免无渲染层的测试环境依赖
   /// WidgetsBinding。
-  VideoController get mpvVideo => _video ??= VideoController(_mpv!);
+  ///
+  /// hwdec 统一由这里决定（见 [mpvHwdec]），和播放层的 setProperty 用同一个值：
+  /// 视频输出创建时 media_kit 会按配置重新设置 hwdec，两边不一致的话以这里为准，
+  /// 「解码方式 › 软件解码」这类偏好就会被盖回去。
+  ///
+  /// 真正需要零拷贝时用 ExoPlayer：它走原生 SurfaceView 直通，画面不经过 CPU。
+  VideoController get mpvVideo =>
+      _video ??= VideoController(
+        _mpv!,
+        configuration: VideoControllerConfiguration(hwdec: mpvHwdec),
+      );
+
+  /// MPV 硬解降级：本次播放关掉硬件解码，改用系统软解。
+  ///
+  /// 只影响当前这一次尝试，不改全局配置——硬件解码在个别片源上会起不来，但换个
+  /// 剧集往往又能用，永久关掉会让后面的剧集一直软解。
+  /// vo 与 hwdec 都是视频输出创建时的属性，运行时改不动，要靠重建输出控制器。
+  Future<void> downgradeMpvHwdec() async {
+    if (!isMpv) return;
+    _mpvSoftwareOnly = true;
+    final platform = this.platform;
+    if (platform != null) {
+      try {
+        await platform.setProperty('hwdec', 'no');
+      } catch (_) {
+        // 切不动就按原流程走。
+      }
+    }
+    _video = null;
+  }
+  /// 恢复硬件解码。上一集硬解起不来而临时降级过软解时，换集后调用这个。
+  Future<void> restoreMpvHwdec() async {
+    if (!isMpv || !_mpvSoftwareOnly) return;
+    _mpvSoftwareOnly = false;
+    final platform = this.platform;
+    if (platform != null) {
+      try {
+        await platform.setProperty('hwdec', _mpvHwdec ?? 'auto-safe');
+      } catch (_) {
+        // 切不动就按原流程走。
+      }
+    }
+    _video = null;
+  }
+
   VideoPlayerController? get exoVideo => _exo?.controller;
 
   EngineState get state => _mpv != null
@@ -124,10 +185,13 @@ class EnginePlayer {
     final exo = _exo;
     if (exo == null) return;
     await exo.applyDecoder(decoder);
+    // 这里只说明「期望」用哪种解码方式，真正用了哪个解码器由播放诊断日记里的
+    // 「实际使用解码器」一行给出（硬解初始化失败时 ExoPlayer 会静默回退软解）。
     DiaryService.add(
-      '[Video] ${switch (decoder) {
-        TelevisionDecoder.software => 'ExoPlayer 内核只用系统软解',
-        _ => 'ExoPlayer 内核优先硬解，解码器初始化失败时回退系统软解',
+      '[Video] 解码方式设定：${switch (decoder) {
+        TelevisionDecoder.software => '只用系统软解',
+        TelevisionDecoder.hardware => '优先硬解',
+        _ => '优先硬解，初始化失败时回退系统软解',
       }}',
     );
   }
@@ -306,9 +370,15 @@ class _ExoCore {
     }
     // 保证原生侧的解码器偏好已经生效，再建 ExoPlayer 实例。
     await AppDevice.setDecoderMode(_decoder.name);
+    // 走 PlatformView（SurfaceView 直通）渲染：与原生 Kotlin 版 ExoPlayer 路径一致。
+    //
+    // Flutter 默认的 texture 路径把视频解码到 SurfaceTexture 上，SurfaceTexture 的缓冲尺寸
+    // 初始为 0x0，部分 32 位设备的硬解解码器在 configure 阶段协商不到匹配的图形缓冲区，
+    // 初始化直接失败后静默回退软解。SurfaceView 有真实的窗口尺寸，不存在这个问题。
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(url),
       httpHeaders: headers,
+      viewType: VideoViewType.platformView,
     );
     _controller = controller;
     controller.addListener(_listen);

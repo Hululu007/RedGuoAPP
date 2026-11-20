@@ -28,40 +28,80 @@ class PlayerVideo extends StatelessWidget {
     final ratio = MediaQuery.devicePixelRatioOf(context);
     return ColoredBox(
       color: Colors.black,
-      child: StreamBuilder<VideoParams>(
-        stream: player.stream.videoParams,
-        initialData: player.state.videoParams,
-        builder: (context, snapshot) => LayoutBuilder(
-          builder: (context, constraints) {
-            final box = constraints.biggest;
-            final source = videoDisplaySize(snapshot.requireData);
-            final size = source == null || !box.isFinite || box.isEmpty
-                ? box
-                : fit.size(box, source, ratio);
-            final sized = ClipRect(
-              child: OverflowBox(
-                minWidth: size.width,
-                maxWidth: size.width,
-                minHeight: size.height,
-                maxHeight: size.height,
-                child: _Surface(player: player),
-              ),
-            );
-            final output = size * ratio;
-            if (!player.isMpv ||
-                !Platform.isWindows ||
-                !output.isFinite ||
-                output.isEmpty) {
-              return sized;
-            }
-            return _OutputSize(
-              controller: player.mpvVideo,
-              box: output,
-              child: sized,
-            );
-          },
-        ),
+      child: Stack(
+        children: [
+          StreamBuilder<VideoParams>(
+            stream: player.stream.videoParams,
+            initialData: player.state.videoParams,
+            builder: (context, snapshot) => LayoutBuilder(
+              builder: (context, constraints) {
+                final box = constraints.biggest;
+                final source = videoDisplaySize(snapshot.requireData);
+                final size = source == null || !box.isFinite || box.isEmpty
+                    ? box
+                    : fit.size(box, source, ratio);
+                final sized = ClipRect(
+                  child: OverflowBox(
+                    minWidth: size.width,
+                    maxWidth: size.width,
+                    minHeight: size.height,
+                    maxHeight: size.height,
+                    child: _Surface(player: player),
+                  ),
+                );
+                final output = size * ratio;
+                if (!player.isMpv ||
+                    !Platform.isWindows ||
+                    !output.isFinite ||
+                    output.isEmpty) {
+                  return sized;
+                }
+                return _OutputSize(
+                  controller: player.mpvVideo,
+                  box: output,
+                  child: sized,
+                );
+              },
+            ),
+          ),
+          // 预热那一路的平台视图。
+          //
+          // 平台视图模式下解码器必须拿到真实的画面表面才会真正开始解码，只建解码器
+          // 实例不算预热。这里把它渲染成零尺寸——原生侧照样创建视图并绑定表面，
+          // Flutter 侧不显示任何内容。切集时这一路已经有解码好的画面等着，直接顶上。
+          _StandbySurface(handle: handle),
+        ],
       ),
+    );
+  }
+}
+
+/// 预热那一路的平台视图。
+///
+/// 渲染成零尺寸：原生侧照样创建视图并把解码器绑到真实表面上，解码器因此能真正开始
+/// 工作；Flutter 侧不显示任何内容，不会影响当前这一集的画面。
+class _StandbySurface extends StatelessWidget {
+  const _StandbySurface({required this.handle});
+
+  final PlaybackHandle handle;
+
+  @override
+  Widget build(BuildContext context) {
+    // 预热状态变化（开始预热、预热完成、切集）都要重新构建，这里跟着会话一起听。
+    return ListenableBuilder(
+      listenable: handle.session,
+      builder: (context, _) {
+        final controller = handle.session.standbyExoVideo;
+        if (controller == null || !controller.value.isInitialized) {
+          return const SizedBox.shrink();
+        }
+        return SizedBox(
+          width: 1,
+          height: 1,
+          // 完全透明：这一路只是让原生侧把解码器绑到真实表面上，画面不显示。
+          child: Opacity(opacity: 0, child: VideoPlayer(controller)),
+        );
+      },
     );
   }
 }
@@ -75,6 +115,12 @@ class _Surface extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = player.exoVideo;
     if (controller != null && controller.value.isInitialized) {
+      // 内核用 VideoViewType.platformView 创建，主包的 VideoPlayer widget 会按播放器状态
+      // 分发到插件的 PlatformViewPlayer（PlatformViewLink + AndroidViewSurface，
+      // Hybrid Composition），保留 SurfaceView 的独立 Surface 与零拷贝。
+      //
+      // 插件在分发时给 PlatformViewPlayer 加了带 playerId 的 key，切集时平台视图会重建，
+      // 原生侧才会把新解码器绑到 Surface 上（否则复用的视图里还留着旧播放器，只剩黑屏）。
       return VideoPlayer(controller);
     }
     if (player.isMpv) {

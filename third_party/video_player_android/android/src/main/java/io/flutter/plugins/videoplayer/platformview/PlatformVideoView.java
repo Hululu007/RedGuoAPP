@@ -24,6 +24,14 @@ public final class PlatformVideoView implements PlatformView {
   @NonNull private final SurfaceView surfaceView;
 
   /**
+   * 当前绑定的播放器。
+   *
+   * <p>切集时 ExoPlayer 是新实例，平台视图可能被复用：如果这里继续拿着已释放的旧实例，
+   * 新解码器就绑不上 Surface，画面只剩黑屏。所以播放器引用可替换，替换时立刻重新绑定。
+   */
+  @NonNull private ExoPlayer exoPlayer;
+
+  /**
    * Constructs a new PlatformVideoView.
    *
    * @param context The context in which the view is running.
@@ -31,9 +39,10 @@ public final class PlatformVideoView implements PlatformView {
    */
   @OptIn(markerClass = UnstableApi.class)
   public PlatformVideoView(@NonNull Context context, @NonNull ExoPlayer exoPlayer) {
-    this.surfaceView = new VideoSurfaceView(context, exoPlayer);
+    this.exoPlayer = exoPlayer;
+    this.surfaceView = new VideoSurfaceView(context, this);
 
-    setupSurfaceWithCallback(exoPlayer);
+    setupSurfaceWithCallback();
 
     if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.N_MR1) {
       // Avoid blank space instead of a video on Android versions below 8 by adjusting video's
@@ -42,7 +51,23 @@ public final class PlatformVideoView implements PlatformView {
     }
   }
 
-  private void setupSurfaceWithCallback(@NonNull ExoPlayer exoPlayer) {
+  /**
+   * 换成新的播放器，并把当前 Surface 交给它。
+   *
+   * @param exoPlayer the new player instance.
+   */
+  @OptIn(markerClass = UnstableApi.class)
+  public void rebindPlayer(@NonNull ExoPlayer exoPlayer) {
+    if (this.exoPlayer == exoPlayer) {
+      return;
+    }
+    this.exoPlayer.clearVideoSurface();
+    this.exoPlayer = exoPlayer;
+    bindPlayerToSurface(exoPlayer, surfaceView.getHolder().getSurface());
+    forceFirstFrameForAndroid9(exoPlayer);
+  }
+
+  private void setupSurfaceWithCallback() {
     surfaceView
         .getHolder()
         .addCallback(
@@ -55,7 +80,10 @@ public final class PlatformVideoView implements PlatformView {
 
               @Override
               public void surfaceChanged(
-                  @NonNull SurfaceHolder holder, int format, int width, int height) {}
+                  @NonNull SurfaceHolder holder, int format, int width, int height) {
+                // Surface 重建后需要重新绑定，否则新解码器的画面没有出口。
+                bindPlayerToSurface(exoPlayer, holder.getSurface());
+              }
 
               @Override
               public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
@@ -89,11 +117,11 @@ public final class PlatformVideoView implements PlatformView {
    * such as after returning from a full-screen route transition.
    */
   private static class VideoSurfaceView extends SurfaceView {
-    private final ExoPlayer exoPlayer;
+    private final PlatformVideoView owner;
 
-    public VideoSurfaceView(Context context, ExoPlayer exoPlayer) {
+    public VideoSurfaceView(Context context, PlatformVideoView owner) {
       super(context);
-      this.exoPlayer = exoPlayer;
+      this.owner = owner;
     }
 
     @Override
@@ -101,7 +129,7 @@ public final class PlatformVideoView implements PlatformView {
       super.onVisibilityChanged(changedView, visibility);
       // When the view becomes visible again, re-attach the current surface.
       if (visibility == View.VISIBLE && isShown()) {
-        bindPlayerToSurface(exoPlayer, getHolder().getSurface());
+        bindPlayerToSurface(owner.exoPlayer, getHolder().getSurface());
       }
     }
   }

@@ -4,11 +4,13 @@
 
 package io.flutter.plugins.videoplayer;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Timeline;
@@ -153,6 +155,37 @@ public abstract class ExoPlayerEventListener implements Player.Listener {
     // Find the currently selected video track and notify
     String selectedVideoTrackId = findSelectedVideoTrackId(tracks);
     events.onVideoTrackChanged(selectedVideoTrackId);
+
+    // 把选中的视频轨道和它在各解码器上的支持情况记进诊断：硬解初始化失败时 ExoPlayer
+    // 会静默回退到软解，应用侧看不到失败原因，这里留下判定依据。
+    for (Tracks.Group group : tracks.getGroups()) {
+      if (group.getType() != C.TRACK_TYPE_VIDEO) {
+        continue;
+      }
+      for (int index = 0; index < group.length; index++) {
+        if (!group.isTrackSelected(index)) {
+          continue;
+        }
+        Format format = group.getTrackFormat(index);
+        DecoderPreference.addDiagnostic(
+            "视频信息：编码="
+                + format.codecs
+                + " 尺寸="
+                + format.width
+                + "x"
+                + format.height
+                + (format.bitrate > 0 ? " 码率=" + (format.bitrate / 1000) + "kbps" : "")
+                + (format.frameRate > 0 ? " 帧率=" + Math.round(format.frameRate) : "")
+                + (format.pixelWidthHeightRatio != 1f
+                    ? " 像素比=" + format.pixelWidthHeightRatio
+                    : "")
+                + (format.rotationDegrees != 0 ? " 旋转=" + format.rotationDegrees + "°" : ""));
+        Context context = DecoderPreference.getAppContext();
+        if (context != null) {
+          PlaybackRenderersFactory.describeDecoderSupport(context, format);
+        }
+      }
+    }
   }
 
   /**
