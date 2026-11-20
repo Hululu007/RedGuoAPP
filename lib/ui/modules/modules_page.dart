@@ -471,7 +471,7 @@ class _ModulesPageState extends State<ModulesPage>
           ],
         ),
       if (_indexError ?? _error case final error?)
-        _Note(error)
+        _Note(_moduleNetworkError)
       else if (_index == null || _modules == null)
         const _Loading()
       else if (listed.isEmpty && warning.isEmpty)
@@ -1310,7 +1310,7 @@ class _ModuleMenu extends StatelessWidget {
         install: false,
         notes: [
           if (module.error.isNotEmpty)
-            Text(module.error, style: TextStyle(color: colors.error)),
+            Text(_moduleNetworkError, style: TextStyle(color: colors.error)),
           if (update case final update?)
             Text(
               '可更新到 ${update.version}',
