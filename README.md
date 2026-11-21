@@ -11,7 +11,7 @@ Android 短剧应用，手机与电视分别适配
 
 ---
 
-改编自 [fish2018](https://github.com/fish2018) 的源码。安装包内置红果站源，其余站源以模块形式在 **我的 › 模块** 安装。
+本项目改编自上游 [Xanerix/guoapp](https://github.com/Xanerix/guoapp)（原名「小果影视」）的源码，上游则重建自原作者 [fish2018](https://github.com/fish2018) 的开源项目。安装包内置红果站源，其余站源以模块形式在 **我的 › 模块** 安装。
 
 > [!WARNING]
 > 项目处于开发阶段，不对用户数据做担保，数据可能在版本更新时丢失。
