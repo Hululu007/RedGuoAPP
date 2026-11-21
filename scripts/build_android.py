@@ -1,9 +1,11 @@
 import argparse
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from app_build import app
@@ -51,5 +53,27 @@ subprocess.run(
     [flutter, 'build', 'apk', '--release', '--split-per-abi', '--no-pub',
      '--target-platform', ','.join(targets[abi] for abi in abis), *app.flutter_arguments],
     cwd=root, env=env, check=True)
-subprocess.run([sys.executable, str(root / 'scripts' / 'package_release.py'), '--platform', 'android', *abi_args],
-               cwd=root, env=env, check=True)
+
+# Android 产物在本脚本内直接校验并整理，不再依赖已移除的
+# scripts/package_release.py。保持原有 dist/android 文件名，兼容发布工作流。
+match = re.search(r'^version:\\s*([\\w.+-]+)\\s*$', (root / 'pubspec.yaml').read_text(encoding='utf-8'), re.MULTILINE)
+if not match:
+    raise SystemExit('pubspec.yaml 缺少合法版本号。')
+version = match.group(1)
+output = root / 'dist' / 'android'
+output.mkdir(parents=True, exist_ok=True)
+
+for abi in abis:
+    source = root / 'build' / 'app' / 'outputs' / 'flutter-apk' / f'app-{abi}-release.apk'
+    if not source.is_file():
+        raise SystemExit('缺少 APK：' + str(source))
+    with zipfile.ZipFile(source) as archive:
+        names = set(archive.namelist())
+        required = [f'lib/{abi}/{library}' for library in
+                    ['libduanju_core.so', 'libflutter.so', 'libapp.so', 'libmpv.so', 'libffmpegkit.so']]
+        missing = set(required) - names
+        if missing:
+            raise SystemExit('APK 缺少原生库：' + ', '.join(sorted(missing)))
+    target = output / f'{app.slug}-{version}-{abi}.apk'
+    shutil.copy2(source, target)
+    print(f'Android APK 已打包：{target}')
