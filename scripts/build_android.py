@@ -56,7 +56,7 @@ subprocess.run(
 
 # Android 产物在本脚本内直接校验并整理，不再依赖已移除的
 # scripts/package_release.py。保持原有 dist/android 文件名，兼容发布工作流。
-match = re.search(r'^version:\\s*([\\w.+-]+)\\s*$', (root / 'pubspec.yaml').read_text(encoding='utf-8'), re.MULTILINE)
+match = re.search(r'^version:\s*([\w.+-]+)\s*$', (root / 'pubspec.yaml').read_text(encoding='utf-8'), re.MULTILINE)
 if not match:
     raise SystemExit('pubspec.yaml 缺少合法版本号。')
 version = match.group(1)
