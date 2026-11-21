@@ -42,16 +42,11 @@ Map<String, String> _missingSources(
   AppRepository repository,
 ) {
   final records = store.missingSourceRecords();
-  final downloads = repository.missingSourceDownloads();
-  final sources = {
-    ...records.follows.keys,
-    ...records.history.keys,
-    ...downloads.keys,
-  }.toList()..sort();
+  final sources = {...records.follows.keys, ...records.history.keys}.toList()
+    ..sort();
   String describe(String source) => [
     if (records.follows[source] case final count?) '追剧 $count 部',
     if (records.history[source] case final count?) '观看记录 $count 条',
-    if (downloads[source] case final count?) '下载 $count 集',
   ].join('，');
   return {for (final source in sources) source: describe(source)};
 }
@@ -134,9 +129,7 @@ class _ModulesPageState extends State<ModulesPage>
       _indexError = null;
     });
     try {
-      final index = await _repository.moduleIndex(
-        all: _store.unlockedSources,
-      );
+      final index = await _repository.moduleIndex(all: _store.unlockedSources);
       if (!mounted) return;
       setState(() => _index = index);
       unawaited(_autoUpdate(index));
@@ -254,7 +247,7 @@ class _ModulesPageState extends State<ModulesPage>
       context: context,
       builder: (context) => AlertDialog(
         title: Text('卸载 ${module.name}？'),
-        content: const Text('该站源的追剧、观看记录和已下载视频会保留，但在重新安装前不再显示，正在下载的集会暂停。'),
+        content: const Text('该站源的追剧和观看记录会保留，但在重新安装前不再显示。'),
         actions: [
           FocusRing(
             radius: 20,
@@ -278,20 +271,13 @@ class _ModulesPageState extends State<ModulesPage>
   }
 
   Future<void> _remove(SourceModule module) => _run(() async {
-    if (_repository.supportsDownloads && SourceSite.isAvailable(module.id)) {
-      await _repository.controlDownloads('pauseSource', id: module.id);
-    }
     await _repository.uninstallModule(module.id);
     _show('${module.name} 已卸载');
   });
 
   Future<void> _toggle(SourceModule module, bool value) {
-    final repository = _repository;
     return saveSetting(context, () async {
       await _store.setSourceEnabled(module.id, value);
-      if (!value && repository.supportsDownloads) {
-        await repository.controlDownloads('pauseSource', id: module.id);
-      }
     });
   }
 
@@ -417,7 +403,7 @@ class _ModulesPageState extends State<ModulesPage>
       onUpdate: enabled ? () => _installIndexed(latest[module.id]!) : null,
       onUninstall: enabled ? () => _uninstall(module) : null,
     );
-    final header = [if (_error case final error?) _Note(_moduleNetworkError)];
+    final header = [if (_error != null) _Note(_moduleNetworkError)];
     if (modules != null &&
         modules.length > 1 &&
         _store.profile.admin &&
@@ -470,7 +456,7 @@ class _ModulesPageState extends State<ModulesPage>
             ),
           ],
         ),
-      if (_indexError ?? _error case final error?)
+      if (_indexError != null || _error != null)
         _Note(_moduleNetworkError)
       else if (_index == null || _modules == null)
         const _Loading()

@@ -6,6 +6,7 @@ final _sha = 'a' * 64;
 Map<String, dynamic> manifest({String tag = 'redguo-v1.0.3-2026112001'}) => {
   'schema': 1,
   'packageName': 'com.x.redguoapp',
+  'signingCertSha256': _sha,
   'version': '1.0.3+2026112001',
   'versionCode': 2026112001,
   'versionName': '1.0.3',

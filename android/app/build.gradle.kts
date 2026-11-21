@@ -68,6 +68,10 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // media_kit 把 libmpv / ffmpeg 的 so 直接拷进 jniLibs，绕过了
+            // ndk.abiFilters，所以 ABI 必须在打包阶段剔除。
+            // 只留 32 位；需要 64 位时把下面这行删掉或改成 "lib/x86/**", "lib/x86_64/**"。
+            excludes += setOf("lib/x86/**", "lib/x86_64/**")
         }
     }
 }
@@ -81,6 +85,11 @@ kotlin {
 dependencies {
     // 应用内更新要走 FileProvider 把安装包交给系统安装程序。
     implementation("androidx.core:core-ktx:1.13.1")
+    // 原生播放内核（com.guoapp.player）直接用 Media3 建双 ExoPlayer 实例。
+    // 版本与 third_party/video_player_android 保持一致，避免出现两份 ExoPlayer。
+    implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("androidx.media3:media3-exoplayer-hls:1.9.2")
+    implementation("androidx.media3:media3-datasource:1.9.2")
 }
 
 flutter { source = "../.." }

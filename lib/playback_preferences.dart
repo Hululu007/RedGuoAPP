@@ -15,16 +15,20 @@ const danmakuColors = [
 
 enum TelevisionDecoder { optimized, hardware, software }
 
+/// 播放内核。Exo 兼容内核已删除，只保留原生双实例一种；保留枚举是为了
+/// 兼容旧版本写入的 `playbackKernel` 字段（mpv / exo 都归一到原生）。
 enum PlaybackKernel {
-  exo('ExoPlayer'),
-  mpv('MPV');
+  /// 原生内核：两个 ExoPlayer 常驻，各自终生绑定一张 SurfaceView，
+  /// 切集只对调可见性，不重建 Surface、不等关键帧。
+  native('原生');
 
   const PlaybackKernel(this.label);
 
   final String label;
 
+  /// 缺字段或取值不认识时与构造默认值保持一致（原生内核）。
   static PlaybackKernel of(String? name) =>
-      PlaybackKernel.values.asNameMap()[name] ?? PlaybackKernel.exo;
+      PlaybackKernel.values.asNameMap()[name] ?? PlaybackKernel.native;
 }
 
 enum DanmakuCoverage {
@@ -119,17 +123,17 @@ class PlaybackPreferences {
     this.danmakuWords = const [],
     this.preload = true,
     this.televisionDecoder = TelevisionDecoder.optimized,
-    this.playbackKernel = PlaybackKernel.exo,
+    this.playbackKernel = PlaybackKernel.native,
     this.preopen,
     this.doubleTapSeek = true,
-    this.swipeLevels = true,
-    this.swipeEpisodes = false,
+    this.swipeLevels = false,
+    this.swipeEpisodes = true,
     this.progressLine = true,
     this.showClock = true,
     this.showNetworkSpeed = true,
     this.autoHideControls = true,
     this.hideSystemBars = true,
-    this.portraitStyleForWide = false,
+    this.portraitStyleForWide = true,
     this.autoPictureInPicture = false,
     this.backgroundPlayback = false,
     this.videoFit = VideoFit.auto,
@@ -170,7 +174,9 @@ class PlaybackPreferences {
   final bool backgroundPlayback;
   final VideoFit videoFit;
 
-  bool preopens({required bool television}) => preopen ?? !television;
+  /// 默认全平台开启（含电视）：原生内核第二个播放器实例本来就常驻，
+  /// 预热只是给它挂上下一集的媒体源，额外开销很小，收益是切集零等待。
+  bool preopens({required bool television}) => preopen ?? true;
 
   PlaybackPreferences copyWith({
     double? speed,
@@ -325,14 +331,14 @@ class PlaybackPreferences {
       playbackKernel: PlaybackKernel.of(value['playbackKernel'] as String?),
       preopen: value['preopen'] as bool?,
       doubleTapSeek: value['doubleTapSeek'] as bool? ?? true,
-      swipeLevels: value['swipeLevels'] as bool? ?? true,
-      swipeEpisodes: value['swipeEpisodes'] as bool? ?? false,
+      swipeLevels: value['swipeLevels'] as bool? ?? false,
+      swipeEpisodes: value['swipeEpisodes'] as bool? ?? true,
       progressLine: value['progressLine'] as bool? ?? true,
       showClock: value['showClock'] as bool? ?? true,
       showNetworkSpeed: value['showNetworkSpeed'] as bool? ?? true,
       autoHideControls: value['autoHideControls'] as bool? ?? true,
       hideSystemBars: value['hideSystemBars'] as bool? ?? true,
-      portraitStyleForWide: value['portraitStyleForWide'] as bool? ?? false,
+      portraitStyleForWide: value['portraitStyleForWide'] as bool? ?? true,
       autoPictureInPicture: value['autoPictureInPicture'] as bool? ?? false,
       backgroundPlayback: value['backgroundPlayback'] as bool? ?? false,
       videoFit: VideoFit.values.asNameMap()[value['videoFit']] ?? VideoFit.auto,

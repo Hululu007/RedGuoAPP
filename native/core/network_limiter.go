@@ -92,6 +92,11 @@ type requestLimiter struct {
 
 const forbiddenStreakLimit = 3
 
+// 前台请求（取地址、目录等）在名额排队上的等待上限。名额被慢请求占满时，
+// 与其让用户盯着转圈等到外层 60 秒超时，不如尽早失败并带上明确的排队
+// 信息——播放层可以自动重试，日记里也能直接看出是「排队」而不是「站源挂了」。
+const foregroundWaitLimit = 15 * time.Second
+
 type BackgroundCatalogKey struct{}
 
 type requestLaneKey struct{}
@@ -137,9 +142,16 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 		limiter.gates[source] = gate
 	}
 	limiter.mu.Unlock()
+	waitStart := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if !background && time.Since(waitStart) > foregroundWaitLimit {
+			return nil, fmt.Errorf(
+				"网络请求排队超时：并发名额已满，等待 %d 秒（有请求占着名额不放或网络异常）",
+				int(time.Since(waitStart).Seconds()),
+			)
 		}
 		limiter.mu.Lock()
 		if backoff := limiter.backoffs[host]; backoff != nil && time.Now().Before(backoff.until) {
@@ -157,12 +169,33 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 				delay = idleDelay
 			}
 		}
+		// 前台排队的硬上限也要挂进 select：没有唤醒源（名额一直不释放、
+		// ctx 也不取消）时，循环不会被再次调度，上限永远到不了点。
+		// 注意这只是「唤醒」计时，不能并入 delay——delay<=0 是「可以立即
+		// 拿名额」的条件，混进去空闲时也拿不到名额。
+		var capTimer *time.Timer
+		var capDeadline <-chan time.Time
+		if !background {
+			remaining := foregroundWaitLimit - time.Since(waitStart)
+			if remaining <= 0 {
+				limiter.mu.Unlock()
+				return nil, fmt.Errorf(
+					"网络请求排队超时：并发名额已满，等待 %d 秒（有请求占着名额不放或网络异常）",
+					int(time.Since(waitStart).Seconds()),
+				)
+			}
+			capTimer = time.NewTimer(remaining)
+			capDeadline = capTimer.C
+		}
 		lowPriorityReady := !background || limiter.foregroundWaiting == 0 && limiter.active == 0
 		if lowPriorityReady && !gate.busy && limiter.active < limiter.concurrency && delay <= 0 {
 			gate.busy = true
 			gate.lastStart = time.Now()
 			limiter.active++
 			limiter.mu.Unlock()
+			if capTimer != nil {
+				capTimer.Stop()
+			}
 			break
 		}
 		changed := limiter.changed
@@ -176,10 +209,14 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 		select {
 		case <-changed:
 		case <-deadline:
+		case <-capDeadline:
 		case <-ctx.Done():
 		}
 		if timer != nil {
 			timer.Stop()
+		}
+		if capTimer != nil {
+			capTimer.Stop()
 		}
 	}
 	var once sync.Once

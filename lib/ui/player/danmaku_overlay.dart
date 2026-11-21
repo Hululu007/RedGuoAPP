@@ -145,7 +145,11 @@ class DanmakuOverlay extends StatelessWidget {
             video ?? const Size(9, 16),
             MediaQuery.devicePixelRatioOf(context),
           );
-          final width = math.min(box.width, shown.width);
+          // 弹幕横向铺满整个容器（边缘到边缘），不随画面宽度收缩：TV 横屏播
+          // 竖屏视频时画面左右有黑边，按画面宽度走的话弹幕只会在屏幕中间滚，
+          // 两端空一大块。纵向范围仍跟随画面（topLimit 优先），黑边只是横向
+          // 被弹幕覆盖，不会出现弹幕滚出画面上下沿。
+          final width = box.width;
           final videoHeight = math.min(box.height, shown.height);
           final videoTop = (box.height - videoHeight) / 2;
           final top = switch (topLimit) {
@@ -379,12 +383,8 @@ class _DanmakuLayerState extends State<_DanmakuLayer>
         width: widget.width,
         rows: widget.rows,
         lifetimeMs: _lifetimeMs,
-        measure: (segments) => measureDanmakuSegments(
-          segments,
-          fill,
-          textScaler: widget.scaler,
-          fontSize: widget.fontSize,
-        ),
+        measure: (segments) =>
+            measureDanmakuSegments(segments, fill, textScaler: widget.scaler),
       );
       _window = _windowAt(_clock.value);
       _drive();
@@ -547,45 +547,17 @@ class _DanmakuText extends StatelessWidget {
   final TextScaler scaler;
   final double fontSize;
 
-  InlineSpan? _span(
-    DanmakuSegment segment,
-    TextStyle textStyle, {
-    required bool withEmoji,
-  }) {
-    final text = segment.text;
-    if (text != null) {
-      if (text.isEmpty) return null;
-      return TextSpan(text: text, style: textStyle);
-    }
-    final extent = danmakuEmojiExtent(fontSize: fontSize, textScaler: scaler);
-    if (!withEmoji) {
-      return WidgetSpan(
-        alignment: PlaceholderAlignment.middle,
-        child: SizedBox(width: extent, height: extent),
-      );
-    }
-    return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
-      child: Image.asset(
-        segment.asset!,
-        width: extent,
-        height: extent,
-        filterQuality: FilterQuality.medium,
-        errorBuilder: (context, error, stackTrace) => SizedBox(
-          width: extent,
-          height: extent,
-          child: Center(
-            child: Text('🙂', style: textStyle, textScaler: scaler),
-          ),
-        ),
-      ),
-    );
+  InlineSpan? _span(DanmakuSegment segment, TextStyle textStyle) {
+    // emoji 已经是 Unicode 文本（系统彩色 emoji 字体渲染），与普通文字同路。
+    final text = segment.text ?? segment.emoji;
+    if (text == null || text.isEmpty) return null;
+    return TextSpan(text: text, style: textStyle);
   }
 
-  Widget _rich(TextStyle textStyle, {required bool withEmoji}) {
+  Widget _rich(TextStyle textStyle) {
     final spans = <InlineSpan>[];
     for (final segment in segments) {
-      final span = _span(segment, textStyle, withEmoji: withEmoji);
+      final span = _span(segment, textStyle);
       if (span != null) spans.add(span);
     }
     if (spans.isEmpty) return const SizedBox.shrink();
@@ -600,12 +572,9 @@ class _DanmakuText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _rich(style, withEmoji: true);
+    final label = _rich(style);
     final stroke = outline;
     if (stroke == null) return label;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [_rich(stroke, withEmoji: false), label],
-    );
+    return Stack(clipBehavior: Clip.none, children: [_rich(stroke), label]);
   }
 }

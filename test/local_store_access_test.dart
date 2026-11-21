@@ -17,12 +17,7 @@ Map<String, Object> _viewer(List<String> sources) => {
       salt: '0' * 32,
       pinHash: '1' * 64,
     ).toJson(),
-    LocalProfile(
-      id: 'viewer',
-      name: '访客',
-      sources: sources,
-      download: false,
-    ).toJson(),
+    LocalProfile(id: 'viewer', name: '访客', sources: sources).toJson(),
   ]),
   'activeProfile': 'viewer',
 };
@@ -33,10 +28,9 @@ Future<LocalStore> _withVisitor() async {
     id: 'default',
     name: '管理员',
     sources: [],
-    download: true,
     pin: 'abcdef12',
   );
-  await store.saveProfile(name: '访客', sources: ['hongguo'], download: false);
+  await store.saveProfile(name: '访客', sources: ['hongguo']);
   return store;
 }
 
@@ -48,17 +42,16 @@ void main() {
     test('users need an administrator password first', () async {
       final store = await openStore();
       await expectLater(
-        store.saveProfile(name: '访客', sources: ['hongguo'], download: false),
+        store.saveProfile(name: '访客', sources: ['hongguo']),
         throwsStateError,
       );
       await store.saveProfile(
         id: 'default',
         name: '管理员',
         sources: [],
-        download: true,
         pin: 'abcdef12',
       );
-      await store.saveProfile(name: '访客', sources: [], download: false);
+      await store.saveProfile(name: '访客', sources: []);
       expect(store.profiles, hasLength(2));
       expect(jsonEncode(await store.files.dump()), isNot(contains('abcdef12')));
     });
@@ -71,7 +64,6 @@ void main() {
 
       expect(store.favorites, isEmpty);
       expect(store.sources.map((site) => site.id), ['hongguo']);
-      expect(store.canDownload, isFalse);
       await store.toggleFavorite(huangdou);
       expect(store.favorites, isEmpty);
       await expectLater(
@@ -96,9 +88,7 @@ void main() {
       final restarted = await restartStore(store);
       expect(restarted.locked, isTrue);
       expect(restarted.sources, isEmpty);
-      expect(restarted.canDownload, isFalse);
       await restarted.switchProfile('default', pin: 'abcdef12');
-      expect(restarted.canDownload, isTrue);
       await restarted.setForceLogin(false);
 
       final unlocked = await restartStore(restarted);

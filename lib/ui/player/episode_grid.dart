@@ -18,14 +18,12 @@ class EpisodeGrid extends StatefulWidget {
     super.key,
     required this.episodes,
     required this.current,
-    required this.selecting,
-    required this.selected,
-    required this.onSelectionChanged,
+    this.selecting = false,
+    this.selected = const {},
+    this.onSelectionChanged,
     required this.onPick,
     this.touch = false,
     this.header,
-    this.downloaded = const {},
-    this.downloading = const {},
     this.minCellWidth,
     this.inset = 16,
   });
@@ -33,12 +31,10 @@ class EpisodeGrid extends StatefulWidget {
   final int current;
   final bool selecting;
   final Set<int> selected;
-  final VoidCallback onSelectionChanged;
+  final VoidCallback? onSelectionChanged;
   final ValueChanged<int> onPick;
   final bool touch;
   final Widget? header;
-  final Set<int> downloaded;
-  final Set<int> downloading;
   final double? minCellWidth;
   final double inset;
 
@@ -61,8 +57,6 @@ class _EpisodeGridState extends State<EpisodeGrid> {
 
   List<Episode> get _episodes => widget.episodes;
   Set<int> get _selected => widget.selected;
-  bool _locked(int index) =>
-      widget.downloaded.contains(index) || widget.downloading.contains(index);
 
   @override
   void didUpdateWidget(EpisodeGrid oldWidget) {
@@ -109,20 +103,18 @@ class _EpisodeGridState extends State<EpisodeGrid> {
     final first = index < _dragAnchor ? index : _dragAnchor;
     final last = index < _dragAnchor ? _dragAnchor : index;
     final range = [
-      for (var item = first; item <= last; item++)
-        if (!_locked(item)) item,
+      for (var item = first; item <= last; item++) item,
     ];
     _selected
       ..clear()
       ..addAll(_dragBase);
     adds ? _selected.addAll(range) : _selected.removeAll(range);
-    widget.onSelectionChanged();
+    widget.onSelectionChanged?.call();
   }
 
   void _toggle(int index) {
-    if (_locked(index)) return;
     if (!_selected.remove(index)) _selected.add(index);
-    widget.onSelectionChanged();
+    widget.onSelectionChanged?.call();
   }
 
   void _dragStart(Offset point) {
@@ -256,14 +248,7 @@ class _EpisodeGridState extends State<EpisodeGrid> {
                             selected: selecting
                                 ? _selected.contains(index)
                                 : null,
-                            marker: widget.downloaded.contains(index)
-                                ? Icons.check_rounded
-                                : widget.downloading.contains(index)
-                                ? Icons.arrow_downward_rounded
-                                : null,
-                            onPressed: _locked(index)
-                                ? null
-                                : !selecting
+                            onPressed: !selecting
                                 ? () => widget.onPick(index)
                                 : widget.touch
                                 ? () => _toggle(index)
@@ -330,14 +315,12 @@ class _EpisodeCell extends StatelessWidget {
     required this.watched,
     required this.selected,
     required this.onPressed,
-    this.marker,
   });
   final Episode episode;
   final bool current;
   final bool watched;
   final bool? selected;
   final VoidCallback? onPressed;
-  final IconData? marker;
 
   @override
   Widget build(BuildContext context) {
@@ -345,20 +328,14 @@ class _EpisodeCell extends StatelessWidget {
     final colors = theme.colorScheme;
     final foreground = current
         ? colors.onPrimaryContainer
-        : watched || marker != null
+        : watched
         ? colors.onSurfaceVariant
         : colors.onSurface;
     final radius = BorderRadius.circular(12);
     return Semantics(
       button: true,
       selected: selected ?? current,
-      label:
-          '第 ${episode.number} 集${episode.vip ? '，VIP' : ''}'
-          '${marker == null
-              ? ''
-              : marker == Icons.check_rounded
-              ? '，已下载'
-              : '，下载中'}',
+      label: '第 ${episode.number} 集${episode.vip ? '，VIP' : ''}',
       excludeSemantics: true,
       child: AnimatedContainer(
         duration: Motion.of(context, Motion.short),
@@ -366,8 +343,6 @@ class _EpisodeCell extends StatelessWidget {
         decoration: ShapeDecoration(
           color: current
               ? colors.primaryContainer
-              : marker != null
-              ? colors.surfaceContainer
               : theme.brightness == Brightness.dark
               ? colors.surfaceContainerHigh
               : colors.surfaceContainerLowest,
@@ -414,12 +389,6 @@ class _EpisodeCell extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (marker case final marker?)
-                  Positioned(
-                    left: 6,
-                    top: 6,
-                    child: Icon(marker, size: 13, color: foreground),
-                  ),
                 if (episode.vip)
                   const Positioned(
                     right: 0,

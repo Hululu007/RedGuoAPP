@@ -1,89 +1,142 @@
 import 'package:flutter/widgets.dart';
 
-const Map<String, String> danmakuEmojiCodepoints = {
-  '爽': '1f60c',
-  '偷笑': '1f60f',
-  '没看够': '1f97a',
-  '笑': '1f604',
-  '笑哭': '1f602',
-  '尬笑': '1f605',
-  '奸笑': '1f63c',
-  '捂脸': '1f926',
-  '爱慕': '1f60d',
-  '飞吻': '1f618',
-  '鼓掌': '1f44f',
-  '赞': '1f44d',
-  '送花': '1f490',
-  '震惊': '1f631',
-  '思考': '1f914',
-  '抓狂': '1f62b',
-  '怒': '1f620',
-  '害羞': '1f60a',
-  '哭': '1f622',
-  '快哭了': '1f979',
-  '求爆更': '1f64f',
-  'OK': '1f44c',
-  '什么': '2753',
-  '流泪': '1f62d',
-  '大笑': '1f606',
-  '微笑': '1f642',
-  '坏笑': '1f608',
-  '白眼': '1f644',
-  '疑问': '2754',
-  '闭嘴': '1f910',
-  '色': '1f61b',
-  '调皮': '1f61c',
-  '难过': '1f614',
-  '馋': '1f924',
-  '晕': '1f635',
-  '流汗': '1f613',
-  '生病': '1f912',
-  '睡着': '1f634',
-  '狗头': '1f436',
-  '比心': '1f91f',
-  '火': '1f525',
-  '加油': '1f4aa',
-  '抱抱': '1f917',
-  '吃瓜': '1f349',
-  '无语': '1f611',
-  '666': '1f44c',
-  '爱心': '2764-fe0f',
-  '拳头': '1f44a',
-  '狂笑': '1f923',
-  '惊喜': '1f929',
+/// 平台弹幕代码 → Unicode emoji。
+///
+/// 渲染走系统自带的彩色 emoji 字体（Android 的 Noto Color Emoji），不占任何
+/// APK 资源——原来的 50 张内置 PNG 已移除。未收录的代码原样保留，不会丢内容。
+const Map<String, String> danmakuEmojiTable = {
+  // 原内置 PNG 对应的码点，显示效果与之前一致
+  '爽': '😌',
+  '偷笑': '🤭',
+  '没看够': '🥺',
+  '笑': '😄',
+  '笑哭': '😂',
+  '尬笑': '😅',
+  '奸笑': '😼',
+  '捂脸': '🤦',
+  '爱慕': '😍',
+  '飞吻': '😘',
+  '鼓掌': '👏',
+  '赞': '👍',
+  '送花': '💐',
+  '震惊': '😱',
+  '思考': '🤔',
+  '抓狂': '😩',
+  '怒': '😠',
+  '害羞': '😊',
+  '哭': '😢',
+  '快哭了': '🥹',
+  '求爆更': '🙏',
+  'OK': '👌',
+  '什么': '❓',
+  '流泪': '😭',
+  '大笑': '😆',
+  '微笑': '🙂',
+  '坏笑': '😈',
+  '白眼': '🙄',
+  '疑问': '❔',
+  '闭嘴': '🤐',
+  '色': '😛',
+  '调皮': '😜',
+  '难过': '😔',
+  '馋': '🤤',
+  '晕': '😵',
+  '流汗': '😓',
+  '生病': '🤒',
+  '睡着': '😴',
+  '狗头': '🐶',
+  '比心': '🤟',
+  '火': '🔥',
+  '加油': '💪',
+  '抱抱': '🤗',
+  '吃瓜': '🍉',
+  '无语': '😐',
+  '666': '👌',
+  '爱心': '❤️',
+  '拳头': '👊',
+  '狂笑': '🤣',
+  '惊喜': '🤩',
+  // 线上弹幕流量里出现、上表没覆盖的代码
+  'doge': '🐶',
+  '灵光一闪': '💡',
+  '滑稽': '🤪',
+  '看': '👀',
+  'what': '😲',
+  '星星眼': '🤩',
+  '打脸': '🤚',
+  '憨笑': '😁',
+  '呲牙': '😁',
+  '酷拽': '😎',
+  '黑脸': '🌚',
+  '得意': '😌',
+  '小鼓掌': '👏',
+  '酷': '😎',
+  '生气': '😠',
+  '发怒': '😡',
+  '咒骂': '🤬',
+  '泣不成声': '😭',
+  '泪奔': '😭',
+  '大哭': '😭',
+  '困': '😪',
+  '衰': '😩',
+  '擦汗': '😓',
+  '抠鼻': '😤',
+  '惊讶': '😮',
+  '耶': '✌️',
+  '鲜花': '🌹',
+  '玫瑰': '🌹',
+  '胜利': '✌️',
+  '厉害': '👍',
+  '叹气': '😮‍💨',
+  '柠檬': '🍋',
+  '尴尬': '😅',
+  '绝望': '😩',
+  '暗中观察': '🕵️',
+  '心碎': '💔',
+  '礼物': '🎁',
+  '可爱': '🥰',
+  '拜托': '🙏',
+  '厉害了我的哥': '😲',
+  '盯': '👀',
 };
+
+/// emoji → 代码名，用于把段落还原回「[代码]」纯文本（复制、日志用）。
+/// 不同代码可能映射同一个 emoji（如「赞」「厉害」都是 👍），保留先出现的那个。
+final Map<String, String> _emojiNames = () {
+  final reversed = <String, String>{};
+  for (final entry in danmakuEmojiTable.entries) {
+    reversed.putIfAbsent(entry.value, () => entry.key);
+  }
+  return reversed;
+}();
 
 final RegExp danmakuEmojiPattern = RegExp(r'\[([^\[\]\s]{1,8})\]');
 
 class DanmakuSegment {
-  const DanmakuSegment.text(this.text) : asset = null;
-  const DanmakuSegment.emoji(this.asset) : text = null;
+  const DanmakuSegment.text(this.text) : emoji = null;
+  const DanmakuSegment.emoji(this.emoji) : text = null;
 
   final String? text;
-  final String? asset;
+  final String? emoji;
 
-  bool get isEmoji => asset != null;
+  bool get isEmoji => emoji != null;
 
   @override
   bool operator ==(Object other) =>
-      other is DanmakuSegment && other.text == text && other.asset == asset;
+      other is DanmakuSegment && other.text == text && other.emoji == emoji;
 
   @override
-  int get hashCode => Object.hash(text, asset);
+  int get hashCode => Object.hash(text, emoji);
 
   @override
-  String toString() => isEmoji ? 'emoji($asset)' : 'text($text)';
+  String toString() => isEmoji ? 'emoji($emoji)' : 'text($text)';
 }
 
-String? danmakuEmojiAsset(String name) {
-  final codepoint = danmakuEmojiCodepoints[name];
-  if (codepoint == null) return null;
-  return 'assets/danmaku_emoji/$codepoint.png';
-}
+String? danmakuEmojiFor(String name) => danmakuEmojiTable[name];
 
 bool hasDanmakuEmoji(String text) {
   for (final match in danmakuEmojiPattern.allMatches(text)) {
-    if (danmakuEmojiCodepoints.containsKey(match.group(1))) return true;
+    if (danmakuEmojiTable.containsKey(match.group(1))) return true;
   }
   return false;
 }
@@ -93,12 +146,12 @@ List<DanmakuSegment> parseDanmakuSegments(String text) {
   final segments = <DanmakuSegment>[];
   var cursor = 0;
   for (final match in danmakuEmojiPattern.allMatches(text)) {
-    final asset = danmakuEmojiAsset(match.group(1)!);
-    if (asset == null) continue;
+    final emoji = danmakuEmojiTable[match.group(1)!];
+    if (emoji == null) continue;
     if (match.start > cursor) {
       segments.add(DanmakuSegment.text(text.substring(cursor, match.start)));
     }
-    segments.add(DanmakuSegment.emoji(asset));
+    segments.add(DanmakuSegment.emoji(emoji));
     cursor = match.end;
   }
   if (cursor < text.length) {
@@ -149,34 +202,17 @@ List<DanmakuSegment> truncateDanmakuSegments(
   return kept;
 }
 
-double danmakuEmojiExtent({
-  required double fontSize,
-  TextScaler textScaler = TextScaler.noScaling,
-}) => textScaler.scale(fontSize) * 1.15 + 2;
-
+/// emoji 已经是普通文本，测量不再需要占位符：直接拼出富文本排一遍。
 double measureDanmakuSegments(
   List<DanmakuSegment> segments,
   TextStyle style, {
   TextScaler textScaler = TextScaler.noScaling,
-  required double fontSize,
 }) {
-  final extent = danmakuEmojiExtent(fontSize: fontSize, textScaler: textScaler);
   final spans = <InlineSpan>[];
-  var placeholders = 0;
   for (final segment in segments) {
-    final text = segment.text;
-    if (text != null) {
-      if (text.isEmpty) continue;
-      spans.add(TextSpan(text: text, style: style));
-      continue;
-    }
-    spans.add(
-      WidgetSpan(
-        alignment: PlaceholderAlignment.middle,
-        child: SizedBox(width: extent, height: extent),
-      ),
-    );
-    placeholders++;
+    final text = segment.text ?? segment.emoji;
+    if (text == null || text.isEmpty) continue;
+    spans.add(TextSpan(text: text, style: style));
   }
   if (spans.isEmpty) return 0;
   final painter = TextPainter(
@@ -185,17 +221,6 @@ double measureDanmakuSegments(
     textScaler: textScaler,
     maxLines: 1,
   );
-  if (placeholders > 0) {
-    painter.setPlaceholderDimensions(
-      List<PlaceholderDimensions>.generate(
-        placeholders,
-        (_) => PlaceholderDimensions(
-          size: Size(extent, extent),
-          alignment: PlaceholderAlignment.middle,
-        ),
-      ),
-    );
-  }
   painter.layout();
   final width = painter.width;
   painter.dispose();
@@ -210,16 +235,8 @@ String danmakuSegmentsText(List<DanmakuSegment> segments) {
       buffer.write(text);
       continue;
     }
-    final asset = segment.asset!;
-    final stem = asset.split('/').last.replaceAll('.png', '');
-    var name = stem;
-    for (final entry in danmakuEmojiCodepoints.entries) {
-      if (entry.value == stem) {
-        name = entry.key;
-        break;
-      }
-    }
-    buffer.write('[$name]');
+    final name = _emojiNames[segment.emoji];
+    buffer.write(name != null ? '[$name]' : segment.emoji!);
   }
   return buffer.toString();
 }

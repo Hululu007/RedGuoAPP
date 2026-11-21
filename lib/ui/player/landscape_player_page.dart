@@ -10,9 +10,7 @@ import '../../models.dart';
 import '../../playback_preferences.dart';
 import '../../playback_engine.dart';
 import '../../playback_session.dart';
-import '../app_scope.dart';
 import '../detail/season_strip.dart';
-import '../downloads/download_actions.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../widgets/contained_slider.dart';
@@ -30,7 +28,6 @@ import 'fade_presence.dart';
 import 'player_surface.dart';
 import 'player_video.dart';
 import 'swipe_controls.dart';
-import 'window_fullscreen.dart';
 
 enum _Panel { episodes, settings, speed, quality, fit }
 
@@ -57,7 +54,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   late final _tabs = TabController(length: 2, initialIndex: 1, vsync: this);
-  final _selected = <int>{};
   final _links = {
     _Panel.speed: LayerLink(),
     _Panel.quality: LayerLink(),
@@ -73,7 +69,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
   String _hint = '';
   bool? _full;
   bool _visible = true;
-  bool _selecting = false;
   bool _holding = false;
   bool _dragging = false;
   double? _seekValue;
@@ -101,10 +96,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     _scheduleHide();
   }
 
-  void _tabChanged() => setState(() {
-    _selecting = false;
-    _selected.clear();
-  });
+  void _tabChanged() => setState(() {});
 
   @override
   void didChangeDependencies() {
@@ -144,9 +136,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     _tabs.dispose();
     if (_holding) _session.endBoost();
     if (widget.onFullscreen == null) {
-      if (_full == true && desktopPlatform) {
-        unawaited(setWindowFullScreen(false));
-      }
       unawaited(AppDevice.releaseOrientation());
       unawaited(
         SystemChrome.setEnabledSystemUIMode(
@@ -351,11 +340,9 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
   }
 
   void _rotate(bool full) => unawaited(
-    desktopPlatform
-        ? setWindowFullScreen(!full)
-        : AppDevice.setPlayerOrientation(
-            full ? PlayerOrientation.portrait : PlayerOrientation.landscape,
-          ),
+    AppDevice.setPlayerOrientation(
+      full ? PlayerOrientation.portrait : PlayerOrientation.landscape,
+    ),
   );
 
   void _back(bool full) {
@@ -368,8 +355,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
       _scheduleHide();
     } else if (full) {
       _rotate(true);
-    } else if (_selecting) {
-      _select(false);
     }
   }
 
@@ -382,11 +367,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     setState(() => _panel = null);
     _scheduleHide();
   }
-
-  void _select(bool selecting) => setState(() {
-    _selecting = selecting;
-    _selected.clear();
-  });
 
   void _saveFailed() {
     if (!mounted) return;
@@ -414,19 +394,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     });
   }
 
-  bool get _canDownload =>
-      AppScope.of(context).repository.supportsDownloads &&
-      widget.store.canDownload;
-
-  void _download() {
-    final detail = _session.detail;
-    final episodes = [
-      for (final index in _selected.toList()..sort()) detail.episodes[index],
-    ];
-    _select(false);
-    unawaited(downloadEpisodes(context, widget.store, detail, episodes));
-  }
-
   @override
   Widget build(BuildContext context) {
     final full = MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -437,7 +404,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
       child: Builder(builder: (context) => _video(context, full)),
     );
     return PopScope(
-      canPop: !full && !_selecting && _panel == null && !_session.locked,
+      canPop: !full && _panel == null && !_session.locked,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back(full);
       },
@@ -485,7 +452,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
       children: [
         PlayerVideo(
           key: ValueKey(session.player),
-          handle: widget.handle,
           player: session.player,
           fit: session.videoFit,
         ),
@@ -514,7 +480,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
         ),
         FadePresence(
           duration: Motion.medium,
-          child: session.ready && session.stalled
+          child: session.ready && session.stalled && session.started
               ? const IgnorePointer(
                   child: Center(child: CircularProgressIndicator()),
                 )
@@ -522,7 +488,9 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
         ),
         FadePresence(
           duration: Motion.medium,
-          child: session.loading ? PlaybackLoading(session: session) : null,
+          child: session.booting
+              ? PlaybackLoading(session: session)
+              : null,
         ),
         FadePresence(
           duration: Motion.medium,
@@ -763,7 +731,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
             child: _Shade(height: 150, top: false),
           ),
         ),
-        if (!desktopPlatform)
           Align(
             alignment: Alignment.centerLeft,
             child: Padding(
@@ -1418,7 +1385,7 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
           Expanded(
             child: TabBarView(
               controller: _tabs,
-              physics: _selecting ? const NeverScrollableScrollPhysics() : null,
+              physics: null,
               children: [_intro(context), _episodes(context)],
             ),
           ),
@@ -1434,7 +1401,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
       selected: selected,
       child: InkWell(
         onTap: () {
-          if (_selecting) _select(false);
           _tabs.animateTo(
             index,
             duration: Motion.of(context, Motion.long),
@@ -1542,7 +1508,6 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
     final session = _session;
     final episodes = session.detail.episodes;
     final drama = session.detail.drama;
-    final all = _selected.length == episodes.length;
     final status = drama.releaseLabel == '状态未知'
         ? ''
         : '${drama.releaseLabel} · ';
@@ -1554,20 +1519,12 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
           children: [
             Expanded(
               child: Text(
-                _selecting
-                    ? '已选 ${_selected.length} 集'
-                    : '$status共 ${episodes.length} 集',
+                '$status共 ${episodes.length} 集',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant),
               ),
             ),
-            if (_canDownload && !_selecting)
-              IconButton(
-                onPressed: () => _select(true),
-                icon: const Icon(Icons.download_rounded),
-                tooltip: '下载选集',
-              ),
           ],
         ),
       ),
@@ -1579,44 +1536,12 @@ class _LandscapePlayerPageState extends State<LandscapePlayerPage>
             header: header,
             episodes: episodes,
             current: session.index,
-            selecting: _selecting,
-            selected: _selected,
             touch: true,
-            onSelectionChanged: () => setState(() {}),
             onPick: (index) {
               if (index != session.index) unawaited(session.play(index));
             },
           ),
         ),
-        if (_selecting)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Row(
-              spacing: 8,
-              children: [
-                TextButton(
-                  onPressed: () => _select(false),
-                  child: const Text('取消'),
-                ),
-                TextButton(
-                  onPressed: () => setState(() {
-                    all
-                        ? _selected.clear()
-                        : _selected.addAll(
-                            List.generate(episodes.length, (i) => i),
-                          );
-                  }),
-                  child: Text(all ? '取消全选' : '全选'),
-                ),
-                const Spacer(),
-                FilledButton.icon(
-                  onPressed: _selected.isEmpty ? null : _download,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('下载'),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }

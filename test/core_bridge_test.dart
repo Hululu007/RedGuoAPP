@@ -20,8 +20,6 @@ List<Future<Object?> Function()> _requests(
     () => repository.detail(drama),
     () => repository.cover(drama),
     () => repository.resolve(drama, episode),
-    () => repository.enqueueDownloads(DramaDetail(drama, [episode]), [episode]),
-    () => repository.localPlayback(drama, episode),
   ];
 }
 
@@ -33,7 +31,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('sources outside this edition never reach the native core', () async {
-    final repository = NativeRepository(background: true);
+    final repository = NativeRepository();
     for (final source in [
       ...SourceSite.allValues
           .where((site) => !SourceSite.isAvailable(site.id))
@@ -46,7 +44,7 @@ void main() {
     }
   });
 
-  test('a user without the source or downloads is stopped first', () async {
+  test('a user without the source is stopped first', () async {
     final store = await openStore({
       'profiles': jsonEncode([
         LocalProfile(
@@ -60,13 +58,11 @@ void main() {
           id: 'viewer',
           name: '只看红果',
           sources: ['hongguo'],
-          download: false,
         ).toJson(),
       ]),
       'activeProfile': 'viewer',
     });
     final repository = NativeRepository()..access = store;
-    expect(repository.supportsDownloads, isFalse);
 
     final denied = drama('2', source: 'huangdou');
     for (final request in _requests(repository, denied)) {
@@ -75,17 +71,6 @@ void main() {
         _failure(allSourcesEnabled ? '当前用户没有此操作权限' : '当前版本不包含此站源'),
       );
     }
-    final allowed = drama('1');
-    final episode = Episode({'id': '1'}, 1);
-    for (final request in [
-      () => repository.enqueueDownloads(DramaDetail(allowed, [episode]), [
-        episode,
-      ]),
-      () => repository.localPlayback(allowed, episode),
-    ]) {
-      await expectLater(request(), _failure('当前用户没有此操作权限'));
-    }
-    await expectLater(repository.downloads(), _failure('当前用户仅支持在线观看'));
   });
 
   test('a locked administrator is stopped before any request', () async {

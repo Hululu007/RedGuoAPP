@@ -1,4 +1,5 @@
 import 'core_bridge.dart';
+import 'diary_service.dart';
 import 'models.dart';
 
 class PlaybackLoader {
@@ -12,18 +13,10 @@ class PlaybackLoader {
     Drama drama,
     Episode episode, {
     int quality = 0,
-    bool localOnly = false,
     bool online = false,
   }) => _load(() async {
     if (online) {
       return repository.resolveOnline(drama, episode, quality: quality);
-    }
-    if (localOnly) {
-      final plan = await repository.localPlayback(drama, episode);
-      if (plan == null || !plan.local) {
-        throw AppFailure('本地视频不可用，请重新下载或选择在线播放。', code: 'local_media');
-      }
-      return plan;
     }
     return repository.resolve(drama, episode, quality: quality);
   });
@@ -40,7 +33,10 @@ class PlaybackLoader {
     }
     final generation = ++_generation;
     try {
-      await repository.cancelPlayback();
+      // 不再先调 cancelPlayback：取消通道是全局的，两个会话同时在取地址时
+      // （小窗自动连播 + 用户另开一部剧），新会话的这一下会把别人正在跑的
+      // 取地址掐掉，对方直接报「context canceled」。旧请求的作废由
+      // beginPlayback 的序列号检查和 generation 守卫负责，结果不会装错。
       if (_closed || generation != _generation) {
         return null;
       }
@@ -61,6 +57,8 @@ class PlaybackLoader {
   Future<void> close() async {
     _closed = true;
     _generation++;
+    // 诊断：确认取消通道的调用来自会话销毁。
+    DiaryService.add('[Play] 播放加载器关闭（会话销毁）');
     await repository.cancelPlayback();
   }
 }

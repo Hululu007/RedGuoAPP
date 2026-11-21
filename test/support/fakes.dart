@@ -44,12 +44,7 @@ final viewerPreferences = <String, Object>{
       salt: '0' * 32,
       pinHash: '1' * 64,
     ).toJson(),
-    const LocalProfile(
-      id: 'viewer',
-      name: '访客',
-      sources: ['hongguo'],
-      download: false,
-    ).toJson(),
+    const LocalProfile(id: 'viewer', name: '访客', sources: ['hongguo']).toJson(),
   ]),
   'activeProfile': 'viewer',
 };
@@ -110,23 +105,6 @@ Future<LocalStore> openStore([
   return store;
 }
 
-DownloadJob downloadJob(
-  Drama drama,
-  int episode, {
-  String state = 'completed',
-  double progress = 1,
-  int bytes = 0,
-  int created = 0,
-}) => DownloadJob(
-  id: '${drama.id}:$episode',
-  drama: drama,
-  episode: Episode(const {}, episode),
-  state: state,
-  progress: progress,
-  bytes: bytes,
-  created: created,
-);
-
 DramaDetail dramaDetail(
   Drama drama, {
   int count = 80,
@@ -160,8 +138,6 @@ class FakeRepository extends AppRepository {
   final rankingRequests = <String>[];
   final recommendRequests = <({bool more, bool force})>[];
   String failure = '';
-  List<DownloadJob>? jobs;
-  int downloadRequests = 0;
   ResourceSettings resource = const ResourceSettings();
   final savedResources = <ResourceSettings>[];
 
@@ -174,39 +150,6 @@ class FakeRepository extends AppRepository {
   ) async {
     savedResources.add(settings);
     return resource = settings;
-  }
-
-  @override
-  bool get supportsDownloads => jobs != null;
-
-  @override
-  Future<List<DownloadJob>> downloads() async {
-    downloadRequests++;
-    return jobs ?? const [];
-  }
-
-  final enqueued = <({String drama, List<int> episodes, int quality})>[];
-  final controls = <String>[];
-  final failingControls = <String>{};
-
-  @override
-  Future<int> enqueueDownloads(
-    DramaDetail detail,
-    List<Episode> episodes, {
-    int quality = 0,
-  }) async {
-    enqueued.add((
-      drama: detail.drama.id,
-      episodes: [for (final episode in episodes) episode.number],
-      quality: quality,
-    ));
-    return episodes.length;
-  }
-
-  @override
-  Future<void> controlDownloads(String command, {String id = ''}) async {
-    if (failingControls.contains(id)) throw AppFailure('无法处理 $id');
-    controls.add('$command|$id');
   }
 
   CatalogPage pageFor(String source, String category, String query, int page) =>

@@ -10,12 +10,10 @@ import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
 import 'danmaku_models.dart';
-import 'background_downloads.dart';
 import 'local_store.dart';
 import 'ranking_models.dart';
-import 'cover_decoder.dart';
 import 'catalog_updates.dart';
-import 'download_collections.dart';
+import 'cover_compat.dart';
 import 'resource_settings.dart';
 import 'diary_service.dart';
 import 'app_update.dart';
@@ -29,18 +27,7 @@ typedef _NativeFree = Void Function(Pointer<Utf8>);
 typedef _DartFree = void Function(Pointer<Utf8>);
 
 String _nativeRequest(String body) {
-  final DynamicLibrary library;
-  if (Platform.isAndroid) {
-    library = DynamicLibrary.open('libduanju_core.so');
-  } else if (Platform.isWindows) {
-    library = DynamicLibrary.open(
-      path.join(path.dirname(Platform.resolvedExecutable), 'duanju_core.dll'),
-    );
-  } else if (Platform.isIOS || Platform.isMacOS) {
-    library = DynamicLibrary.process();
-  } else {
-    throw UnsupportedError('当前支持 Android、iOS、Windows 和 macOS');
-  }
+  final library = DynamicLibrary.open('libduanju_core.so');
   final request = library.lookupFunction<_NativeRequest, _DartRequest>(
     'DuanjuRequest',
   );
@@ -135,53 +122,11 @@ abstract class AppRepository {
       throw AppFailure('当前环境不支持安装模块');
   Future<void> uninstallModule(String id) async =>
       throw AppFailure('当前环境不支持卸载模块');
-  Map<String, int> missingSourceDownloads() => const {};
   Future<List<String>> suggestions(String source, String query) async =>
       const [];
-  Future<Map<String, dynamic>> storage() async => {};
-  Future<String> downloadDirectory() async =>
-      (await storage())['directory'] as String? ?? '';
-  Future<({String path, String reason})> moveDownloads(
-    String directory,
-  ) async => throw AppFailure('当前环境不支持迁移');
-  Future<int> workLease(String id, String command) async => 0;
   Future<int> cacheBytes() async => 0;
   Future<void> clearCache() async => throw AppFailure('当前环境不支持清理缓存');
   Future<List<String>> deleteAllData() async => throw AppFailure('当前环境不支持删除数据');
-  bool get supportsDownloads => false;
-  Future<List<DownloadJob>> downloads() async => [];
-  Future<int> enqueueDownloads(
-    DramaDetail detail,
-    List<Episode> episodes, {
-    int quality = 0,
-  }) async => throw AppFailure('当前环境不支持下载');
-  Future<void> controlDownloads(String command, {String id = ''}) async {}
-  Future<DownloadConversion> beginConversion(String id) async =>
-      throw AppFailure('当前环境不支持处理下载');
-  Future<void> finishConversion(String id, String result) async {}
-  Future<DownloadBatchResult> controlDownloadBatch(
-    String command,
-    List<String> ids,
-  ) async {
-    final completed = <String>[], failures = <String, String>{};
-    for (final id in ids.toSet()) {
-      try {
-        await controlDownloads(command, id: id);
-        completed.add(id);
-      } catch (error) {
-        failures[id] = error.toString();
-      }
-    }
-    return DownloadBatchResult(completed: completed, failures: failures);
-  }
-
-  Future<int> updateDownloadCollection(
-    DramaDetail detail,
-    List<Episode> episodes, {
-    int quality = 0,
-  }) => enqueueDownloads(detail, episodes, quality: quality);
-  Future<PlaybackPlan?> localPlayback(Drama drama, Episode episode) async =>
-      null;
   Future<PlaybackPlan> resolveOnline(
     Drama drama,
     Episode episode, {
@@ -221,10 +166,7 @@ abstract class AppRepository {
 }
 
 class NativeRepository extends AppRepository {
-  static final _coverDecoder = CoverDecoder();
   static final _coverPaths = <String, String>{};
-  NativeRepository({this.background = false});
-  final bool background;
   LocalStore? access;
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
@@ -310,7 +252,7 @@ class NativeRepository extends AppRepository {
       'chapter': episode.raw,
       'index': episode.number,
       'quality': quality,
-      'force': online || access?.canDownload == false,
+      'force': online,
     }),
   );
 
@@ -465,21 +407,13 @@ class NativeRepository extends AppRepository {
     );
   }
 
-  void _authorize(String source, {bool download = false}) {
+  void _authorize(String source) {
     if (!SourceSite.isAvailable(source)) {
       throw AppFailure('当前版本不包含此站源');
     }
     if (access == null) return;
-    if (access!.locked ||
-        !access!.allowsSource(source) ||
-        download && !access!.canDownload) {
+    if (access!.locked || !access!.allowsSource(source)) {
       throw AppFailure('当前用户没有此操作权限');
-    }
-  }
-
-  void _downloadPermission() {
-    if (access != null && (access!.locked || !access!.canDownload)) {
-      throw AppFailure('当前用户仅支持在线观看');
     }
   }
 
@@ -493,51 +427,6 @@ class NativeRepository extends AppRepository {
     });
     return (result['items'] as List? ?? []).whereType<String>().toList();
   }
-
-  @override
-  Future<String> downloadDirectory() async {
-    _downloadPermission();
-    return (await _call({'action': 'downloadDirectory'}))['directory']
-            as String? ??
-        '';
-  }
-
-  @override
-  Future<Map<String, dynamic>> storage() async {
-    _downloadPermission();
-    return _call({'action': 'storage'});
-  }
-
-  @override
-  Future<({String path, String reason})> moveDownloads(String directory) async {
-    _downloadPermission();
-    if (access != null && !access!.profile.admin) {
-      throw AppFailure('仅管理员可更改下载目录');
-    }
-    await BackgroundDownloads.ensureStarted();
-    await workLease('storage', 'start');
-    try {
-      final result = await _call({
-        'action': 'moveDownloads',
-        'directory': directory,
-      });
-      return (
-        path: result['leftover'] as String? ?? '',
-        reason: result['leftoverReason'] as String? ?? '',
-      );
-    } finally {
-      await workLease('storage', 'end');
-    }
-  }
-
-  @override
-  Future<int> workLease(String id, String command) async => intValue(
-    (await _call({
-      'action': 'workLease',
-      'jobId': id,
-      'command': command,
-    }))['count'],
-  );
 
   @override
   Future<int> cacheBytes() async =>
@@ -554,21 +443,13 @@ class NativeRepository extends AppRepository {
     if (access != null && !access!.profile.admin) {
       throw AppFailure('仅管理员可删除全部数据');
     }
-    await workLease('storage', 'start');
-    try {
-      final result = await _call({'action': 'deleteAllData'});
-      return [
-        for (final item in result['leftover'] as List? ?? const []) '$item',
-      ];
-    } catch (_) {
-      await workLease('storage', 'end');
-      rethrow;
-    }
+    final result = await _call({'action': 'deleteAllData'});
+    return [
+      for (final item in result['leftover'] as List? ?? const []) '$item',
+    ];
   }
 
   int _playbackSequence = DateTime.now().microsecondsSinceEpoch;
-  (String, List<DownloadJob>) _downloadCache = ('', const []);
-  List<DownloadJob> _visibleDownloads = const [];
 
   @override
   Future<AppUpdate?> checkUpdate() async {
@@ -666,8 +547,6 @@ class NativeRepository extends AppRepository {
             'cancelRead',
             'updateSystemProxy',
           }.contains(action) ||
-          action == 'workLease' && input['command'] == 'end' ||
-          action == 'finishConversion' ||
           action == 'cast' && {'stop', 'active'}.contains(input['command']) ||
           action == 'lan' &&
               {
@@ -696,30 +575,9 @@ class NativeRepository extends AppRepository {
             'metadata',
             'resolve',
             'preload',
-            'enqueueDownloads',
-            'localPlayback',
           }.contains(action) ||
           action == 'cast' && input['command'] == 'play') {
-        _authorize(
-          (input['drama'] as Map)['source'] as String,
-          download: action == 'enqueueDownloads' || action == 'localPlayback',
-        );
-      }
-      if (!unrestricted &&
-          {
-            'downloads',
-            'controlDownloads',
-            'controlDownloadBatch',
-            'beginConversion',
-            'storage',
-            'downloadDirectory',
-            'moveDownloads',
-            'workLease',
-          }.contains(action)) {
-        _downloadPermission();
-      }
-      if (action == 'resolve' && access != null && !access!.canDownload) {
-        input['force'] = true;
+        _authorize((input['drama'] as Map)['source'] as String);
       }
       final body = jsonEncode(input);
       final response =
@@ -727,7 +585,7 @@ class NativeRepository extends AppRepository {
             () => jsonDecode(_nativeRequest(body)) as Map<String, dynamic>,
           ).timeout(
             Duration(
-              seconds: action == 'moveDownloads' || action == 'deleteAllData'
+              seconds: action == 'deleteAllData'
                   ? 620
                   : action == 'danmaku'
                   ? 15
@@ -737,18 +595,35 @@ class NativeRepository extends AppRepository {
             ),
           );
       if (response['ok'] != true) {
+        final raw = response['error'] as String? ?? '读取失败，请重试';
+        // 诊断：取消类错误把 Go 侧的原始描述写进日记，
+        // 「序列号过期」和「执行中被取消」会带不同的括号说明。
+        if (raw.contains('context canceled')) {
+          DiaryService.add('[Core] $action 取消详情：$raw');
+        }
+        final timeout =
+            raw.contains('context deadline exceeded') ||
+            raw.contains('排队超时');
         throw AppFailure(
-          response['error'] as String? ?? '读取失败，请重试',
-          code: response['code'] as String? ?? '',
+          // 取地址超时给用户看人话，原始英文进日记。
+          timeout && {'resolve', 'fallback', 'preload'}.contains(action)
+              ? '获取播放地址超时，请重试'
+              : raw,
+          // Go 侧请求上下文被取消（context canceled）只可能来自应用自己的
+          // 取消通道（退出播放、切换请求、另一个会话在同时取地址），不是站源
+          // 的错。打上 canceled 标记，播放层据此自动重试而不是直接报错。
+          // deadline exceeded 是 Go 侧 60 秒/25 秒超时到点，打 timeout 标记。
+          code: raw.contains('context canceled')
+              ? 'canceled'
+              : timeout
+              ? 'timeout'
+              : response['code'] as String? ?? '',
         );
       }
       final data = response['data'];
       if (!unrestricted && epoch != access?.profileEpoch) {
         if (data is Map && data['session'] is String) {
           await release(data['session'] as String);
-        }
-        if (action == 'workLease' && input['command'] == 'start') {
-          await workLease(input['jobId'] as String, 'end');
         }
         throw AppFailure('用户已切换，请重新操作');
       }
@@ -874,39 +749,18 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Map<String, int> missingSourceDownloads() {
-    final counts = <String, int>{};
-    for (final job in _downloadCache.$2) {
-      final source = job.drama.source;
-      if (!SourceSite.isAvailable(source)) {
-        counts[source] = (counts[source] ?? 0) + 1;
-      }
-    }
-    return counts;
-  }
-
-  @override
   Future<void> initialize() async {
     final directory = await getApplicationSupportDirectory();
-    if (!background) {
-      DiaryService.nativeLogPath = path.join(directory.path, 'logs', 'app.log');
-    }
-    final external = Platform.isAndroid
-        ? await getExternalStorageDirectory()
-        : null;
+    DiaryService.nativeLogPath = path.join(directory.path, 'logs', 'app.log');
     final build = await _call({
       'action': 'initialize',
       'directory': directory.path,
       'cache': (await getApplicationCacheDirectory()).path,
-      if (external != null) 'downloads': path.join(external.path, 'downloads'),
     });
     _installSources(build['sources']);
-    if (!background) await BackgroundDownloads.prepare();
-    if (!background) {
-      SystemProxyMonitor.start((value) async {
-        await _call({'action': 'updateSystemProxy', 'systemProxy': value});
-      });
-    }
+    SystemProxyMonitor.start((value) async {
+      await _call({'action': 'updateSystemProxy', 'systemProxy': value});
+    });
   }
 
   @override
@@ -959,14 +813,24 @@ class NativeRepository extends AppRepository {
   String? knownCover(Drama drama) =>
       _coverPaths['${drama.id}\u0000${drama.cover}'];
 
+  /// 只在原生转码失败时记住：下次命中缓存还要再试一次，成功后不再重复调用。
+  static final _heicCovers = <String>{};
+
   @override
   Future<String> cover(Drama drama, {bool force = false}) async {
     final key = '${drama.id}\u0000${drama.cover}';
     final known = force ? null : _coverPaths[key];
     if (known != null) {
       _authorize(drama.source);
-      if (await File(known).exists()) return known;
+      if (await File(known).exists()) {
+        if (!_heicCovers.contains(key)) return known;
+        final converted = await CoverCompat.convert(known);
+        if (converted == null) return known;
+        _heicCovers.remove(key);
+        return _rememberCover(key, converted);
+      }
       _coverPaths.remove(key);
+      _heicCovers.remove(key);
     }
     final epoch = access?.profileEpoch;
     final result = await _call({
@@ -974,17 +838,20 @@ class NativeRepository extends AppRepository {
       'drama': drama.toJson(),
       'force': force,
     });
-    final file = result['path'] as String? ?? '';
+    var file = result['path'] as String? ?? '';
     if (file.isEmpty) throw AppFailure('海报暂不可用');
-    if (result['heic'] != true) return _rememberCover(key, file);
-    final converted = await _coverDecoder.convert(
-      file,
-      () => _call({'action': 'prepareCover', 'drama': drama.toJson()}),
-      force: force,
-    );
+    // HEIC 交给系统 ImageDecoder 转 JPEG；转不了才退回原图，至少不阻塞列表。
+    if (result['heic'] == true) {
+      final converted = await CoverCompat.convert(file);
+      if (converted != null) {
+        file = converted;
+      } else {
+        _heicCovers.add(key);
+      }
+    }
     _authorize(drama.source);
     if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
-    return _rememberCover(key, converted);
+    return _rememberCover(key, file);
   }
 
   String _rememberCover(String key, String path) {
@@ -1034,167 +901,9 @@ class NativeRepository extends AppRepository {
       );
   @override
   Future<void> cancelPlayback() async {
+    // 诊断：全应用只有会话销毁会走这里，出现这条日记就能锁定取消通道的调用方。
+    DiaryService.add('[Core] cancelPlayback 调用（播放取消通道）');
     await _call({'action': 'cancelPlayback', 'sequence': ++_playbackSequence});
-  }
-
-  @override
-  bool get supportsDownloads => access?.canDownload ?? true;
-
-  @override
-  Future<List<DownloadJob>> downloads() async {
-    final result = await _call({
-      'action': 'downloads',
-      'since': _downloadCache.$1,
-    });
-    if (result['jobs'] case final List jobs) {
-      _downloadCache = (
-        result['fingerprint'] as String? ?? '',
-        jobs
-            .whereType<Map>()
-            .map(
-              (value) => DownloadJob.fromJson(Map<String, dynamic>.from(value)),
-            )
-            .toList(),
-      );
-    }
-    final visible = _downloadCache.$2
-        .where(
-          (job) =>
-              SourceSite.isAvailable(job.drama.source) &&
-              (access == null || access!.allowsSource(job.drama.source)),
-        )
-        .toList();
-    final previous = _visibleDownloads;
-    if (visible.length == previous.length &&
-        visible.indexed.every(
-          (entry) => identical(entry.$2, previous[entry.$1]),
-        )) {
-      return previous;
-    }
-    return _visibleDownloads = List.unmodifiable(visible);
-  }
-
-  @override
-  Future<int> enqueueDownloads(
-    DramaDetail detail,
-    List<Episode> episodes, {
-    int quality = 0,
-  }) async {
-    _authorize(detail.drama.source, download: true);
-    final epoch = access?.profileEpoch;
-    await BackgroundDownloads.ensureStarted();
-    if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
-    final result = await _call({
-      'action': 'enqueueDownloads',
-      'drama': detail.drama.toJson(),
-      'quality': quality,
-      'entries': episodes
-          .map((episode) => {'chapter': episode.raw, 'index': episode.number})
-          .toList(),
-    });
-    return intValue(result['added']);
-  }
-
-  @override
-  Future<int> updateDownloadCollection(
-    DramaDetail detail,
-    List<Episode> episodes, {
-    int quality = 0,
-  }) async {
-    _authorize(detail.drama.source, download: true);
-    final epoch = access?.profileEpoch;
-    await BackgroundDownloads.ensureStarted();
-    if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
-    final result = await _call({
-      'action': 'enqueueDownloads',
-      'force': true,
-      'drama': detail.drama.toJson(),
-      'quality': quality,
-      'entries': episodes
-          .map((episode) => {'chapter': episode.raw, 'index': episode.number})
-          .toList(),
-    });
-    return intValue(result['added']);
-  }
-
-  @override
-  Future<DownloadBatchResult> controlDownloadBatch(
-    String command,
-    List<String> ids,
-  ) async {
-    _downloadPermission();
-    final epoch = access?.profileEpoch;
-    if (ids.isEmpty || ids.length > 500) throw AppFailure('每批请选择 1 至 500 个任务');
-    final visible = (await downloads()).map((job) => job.id).toSet();
-    if (ids.any((id) => !visible.contains(id))) {
-      throw AppFailure('部分任务已删除或当前用户无权操作，请刷新');
-    }
-    if (command == 'resume') await BackgroundDownloads.ensureStarted();
-    if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
-    return DownloadBatchResult.fromJson(
-      await _call({
-        'action': 'controlDownloadBatch',
-        'command': command,
-        'jobIds': ids,
-      }),
-    );
-  }
-
-  @override
-  Future<void> controlDownloads(String command, {String id = ''}) async {
-    _downloadPermission();
-    if (command == 'resume' || command == 'resumeAll') {
-      await BackgroundDownloads.ensureStarted();
-    }
-    if (access != null && !access!.profile.admin) {
-      final visible = await downloads();
-      if (command == 'pauseAll' || command == 'resumeAll') {
-        for (final job in visible.where(
-          (job) => command == 'pauseAll' ? job.active : job.resumable,
-        )) {
-          await _call({
-            'action': 'controlDownloads',
-            'command': command == 'pauseAll' ? 'pause' : 'resume',
-            'jobId': job.id,
-          });
-        }
-        return;
-      }
-      if (!visible.any((job) => job.id == id)) {
-        throw AppFailure('当前用户没有此下载任务权限');
-      }
-    }
-    await _call({
-      'action': 'controlDownloads',
-      'command': command,
-      'jobId': id,
-    });
-  }
-
-  @override
-  Future<DownloadConversion> beginConversion(String id) async {
-    final result = await _call({'action': 'beginConversion', 'jobId': id});
-    return (
-      input: result['input'] as String? ?? '',
-      key: result['key'] as String? ?? '',
-      output: result['output'] as String? ?? '',
-    );
-  }
-
-  @override
-  Future<void> finishConversion(String id, String result) async {
-    await _call({'action': 'finishConversion', 'jobId': id, 'command': result});
-  }
-
-  @override
-  Future<PlaybackPlan?> localPlayback(Drama drama, Episode episode) async {
-    final result = await _call({
-      'action': 'localPlayback',
-      'drama': drama.toJson(),
-      'index': episode.number,
-    });
-    if ((result['url'] as String? ?? '').isEmpty) return null;
-    return PlaybackPlan.fromJson(result);
   }
 
   @override

@@ -21,11 +21,11 @@ const displayModes = {
 
 Map<String, String> get availableDisplayModes => {
   for (final MapEntry(:key, :value) in displayModes.entries)
-    if (desktopPlatform || key != 'window') key: value,
+    if (key != 'window') key: value,
 };
 
 String platformDisplayMode(String mode) =>
-    mode == 'window' && !desktopPlatform ? 'pad' : mode;
+    mode == 'window' ? 'pad' : mode;
 
 class AppearanceSettings extends StatelessWidget {
   const AppearanceSettings({super.key, required this.store});
@@ -204,28 +204,31 @@ class AppearanceSettings extends StatelessWidget {
               ),
           ],
         ),
-        GroupCard(
-          children: [
-            SettingsTile(
-              title: '界面模式',
-              subtitle: displayModes[platformDisplayMode(store.displayMode)]!,
-              onTap: () async {
-                final selection = await showOptionDialog(
-                  context,
-                  title: '界面模式',
-                  options: availableDisplayModes,
-                  selected: platformDisplayMode(store.displayMode),
-                );
-                if (selection != null && context.mounted) {
-                  await saveSetting(
+        // 真电视设备隐藏「界面模式」：切到手机/平板界面后遥控器无法操作。
+        // 手机等设备即使手动切到电视界面，也保留这个入口以便切回来。
+        if (!AppScope.of(context).canHideDisplayModeSwitch)
+          GroupCard(
+            children: [
+              SettingsTile(
+                title: '界面模式',
+                subtitle: displayModes[platformDisplayMode(store.displayMode)]!,
+                onTap: () async {
+                  final selection = await showOptionDialog(
                     context,
-                    () => store.setDisplayMode(selection),
+                    title: '界面模式',
+                    options: availableDisplayModes,
+                    selected: platformDisplayMode(store.displayMode),
                   );
-                }
-              },
-            ),
-          ],
-        ),
+                  if (selection != null && context.mounted) {
+                    await saveSetting(
+                      context,
+                      () => store.setDisplayMode(selection),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
       ],
     );
   }

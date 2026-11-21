@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -155,6 +156,8 @@ type nativeEngine struct {
 	playbackMu          sync.Mutex
 	playbackSequence    int64
 	playbackCancel      context.CancelFunc
+	resolveMu           sync.Mutex
+	resolveCache        map[string]nativeResolveEntry
 	sourceCatalogMu     sync.Mutex
 	sourceCatalogs      map[string]chan struct{}
 }
@@ -256,7 +259,10 @@ func newNativeEngine(directory, cache, downloads string) (*nativeEngine, error) 
 	cfg.cacheDir = cache
 	router := &proxyRouter{}
 	d := &Downloader{cfg: cfg, providerHosts: map[string]string{}, proxyRouter: router,
-		limiter: newRequestLimiter(3, 0), diagnostics: newDiagnosticLog(directory)}
+		// 全局并发名额：站源请求仍按站源串行（gate），这里只是跨站源的总量
+		// 上限。3 个太少——封面、弹幕、取地址会互相饿死（慢 CDN 占住名额，
+		// 取地址排队到超时），放宽到 6 让前台请求不排队。
+		limiter: newRequestLimiter(6, 0), diagnostics: newDiagnosticLog(directory)}
 	router.record = d.recordDiagnostic
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
@@ -644,7 +650,37 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama LibraryDrama
 	return map[string]any{"drama": drama, "chapters": chapters, "warning": warning}, nil
 }
 
+// nativeResolve 完成手动取地址。传入的 ctx 必须是分发层已经通过
+// nativeBeginPlayback 开始的播放上下文——这里绝不能再 begin 一次：
+// 同一个序列号第二次过闸会被判过期（请求=当前），取地址永远失败，
+// 表现就是「暂时无法播放，context canceled」。
 func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput) (nativePlan, error) {
+	started := time.Now()
+	plan, err := engine.resolveIntoPlan(ctx, input)
+	// 诊断：取地址明显变慢时留下记录。正常解析在 1 秒内完成；慢解析多半是
+	// 站源模块的网络请求慢，或全局请求名额被占满在排队——两种情况都能从
+	// 这里区分开。
+	if elapsed := time.Since(started); err == nil && elapsed > 3*time.Second {
+		engine.downloader.recordDiagnostic(diagnosticEvent{
+			Time: time.Now(), Level: "info", Event: "playback.resolve_slow",
+			Source: nativeActionSource(input), Host: input.Drama.ID,
+			Message: fmt.Sprintf("取地址耗时 %d ms（第 %d 集）", elapsed.Milliseconds(), input.Index+1),
+		})
+	}
+	if err != nil && errors.Is(err, context.Canceled) {
+		// 诊断：取地址执行中播放上下文被外部取消（新的播放请求或取消通道），
+		// 与序列号过期区分开，日志能看出取消发生在哪个阶段。
+		return nativePlan{}, fmt.Errorf("context canceled（取地址执行中被取消）")
+	}
+	return plan, err
+}
+
+// resolveIntoPlan 完成取地址到播放计划的全程，但不参与 playback 取消通道。
+// 预加载走这里：它的序列号来自读取计数器，与手动取地址的 playback 序列号
+// 不在一个数量级，若进 nativeBeginPlayback 会被判为过期请求直接拒绝
+// （表现为预加载永远失败、每次换集都现取地址）。预加载的生命周期由
+// beginRead（新请求取消旧请求、超时、会话释放）自行管理。
+func (engine *nativeEngine) resolveIntoPlan(ctx context.Context, input nativeInput) (nativePlan, error) {
 	if _, _, valid := SplitProviderDramaID(input.Drama.ID); !valid {
 		return nativePlan{}, errors.New("剧集信息无效")
 	}
@@ -654,7 +690,7 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 		}
 	}
 	task := Task{DramaID: input.Drama.ID, DramaTitle: input.Drama.Title, Chapter: input.Chapter, Index: input.Index}
-	media, err := engine.downloader.resolveProviderMedia(ctx, task)
+	media, err := engine.resolveProviderMediaCached(ctx, task, input.Force)
 	if err != nil {
 		return nativePlan{}, err
 	}

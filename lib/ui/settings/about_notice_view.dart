@@ -95,10 +95,7 @@ class _AboutNoticeViewState extends State<AboutNoticeView> {
               width: 26,
               child: Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  '${index + 1}'.padLeft(2, '0'),
-                  style: number,
-                ),
+                child: Text('${index + 1}'.padLeft(2, '0'), style: number),
               ),
             ),
             Expanded(child: Text(text, style: body)),
@@ -306,11 +303,11 @@ const _statement = [
   '本应用是开源软件，框架与模块商店中的站源模块代码公开，仅供个人学习与技术研究，不收费，不提供任何付费服务。',
   '本应用与各站源的运营方无任何关联，未获得其授权或认可；文中提到的名称和商标归各自权利人所有。',
   '本应用本身不存储、不上传、不分发任何影视内容，所有内容均来自第三方站点，版权归原权利人所有；应用不解除源站 VIP 或其他授权限制。',
-  '通过本应用观看或下载的内容仅供试看和个人学习交流，请于下载后 24 小时内删除；如喜欢相关作品，请支持正版。',
+  '通过本应用观看的内容仅供试看和个人学习交流，请勿用于商业用途；如喜欢相关作品，请支持正版。',
   '站源内容（包括其中的广告、链接、二维码、联系方式等）均由第三方提供，请自行鉴别真伪，切勿轻信其中的充值、投资、博彩、兼职等信息；由此造成的任何财产损失，作者不承担任何责任。',
   '使用者应遵守所在地法律法规及各站点的服务条款，不得将本应用用于违法或商业用途；因使用本应用产生的一切后果由使用者自行承担。',
   '本应用按「现状」提供，不对可用性、稳定性或适用性作任何保证，作者不承担由此造成的任何直接或间接损失。',
-  '观看记录、追剧和下载等数据只保存在本设备，不发送任何统计数据。',
+  '观看记录、追剧和偏好设置只保存在本设备，不发送任何统计数据。',
 ];
 
 const _license =
@@ -331,11 +328,7 @@ const List<(String, List<(String, String, String)>)> _componentGroups = [
   (
     '播放内核',
     [
-      ('media_kit / media_kit_video', 'MIT', 'MPV 内核的 Dart 封装'),
-      ('libmpv / FFmpeg', 'LGPL-2.1+ / GPL-2.0+', '随 media_kit_libs_video 分发的解码库'),
-      ('video_player', 'BSD-3-Clause', 'ExoPlayer 的 Flutter 封装'),
-      ('ExoPlayer（Media3）', 'Apache-2.0', '系统原生播放内核'),
-      ('ffmpeg_kit', 'LGPL-3.0 / GPL-3.0', '下载合成与格式转换（new_min_gpl）'),
+      ('ExoPlayer（Media3）', 'Apache-2.0', '视频解码与渲染内核'),
     ],
   ),
   (
@@ -345,8 +338,6 @@ const List<(String, List<(String, String, String)>)> _componentGroups = [
       ('shared_preferences', 'BSD-3-Clause', '键值设置存储'),
       ('path / path_provider', 'BSD-3-Clause', '路径与目录访问'),
       ('file_picker', 'MIT', '文件选择'),
-      ('flutter_foreground_task', 'MIT', '后台下载前台服务'),
-      ('window_manager', 'MIT', '桌面窗口管理'),
     ],
   ),
   (

@@ -6,8 +6,6 @@ import 'package:flutter/services.dart';
 import '../../local_store.dart';
 import '../../models.dart';
 import '../../playback_session.dart';
-import '../app_scope.dart';
-import '../downloads/download_actions.dart';
 import '../theme/app_theme.dart';
 import '../widgets/focus_ring.dart';
 import '../widgets/follow_button.dart';
@@ -15,7 +13,6 @@ import 'episode_grid.dart';
 import 'mini_player.dart';
 import 'playback_handle.dart';
 import 'player_surface.dart';
-import 'window_fullscreen.dart';
 
 const _panelWidth = 360.0;
 
@@ -25,13 +22,11 @@ class PlayerPage extends StatefulWidget {
     required this.store,
     required this.handle,
     this.padFullscreen,
-    this.onWindowFullscreen,
     this.onMiniWindow,
   });
   final LocalStore store;
   final PlaybackHandle handle;
   final ValueNotifier<bool>? padFullscreen;
-  final ValueChanged<bool>? onWindowFullscreen;
   final VoidCallback? onMiniWindow;
 
   @override
@@ -42,18 +37,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   final _focus = FocusNode(debugLabel: 'player');
   final _surfaceKey = GlobalKey();
   final _hint = ValueNotifier('');
-  final _selected = <int>{};
   Timer? _hintTimer;
   late bool _wide = !_touch && widget.store.playerWide;
-  bool _windowFullscreen = false;
   bool _seekHeld = false;
-  bool _selecting = false;
 
   PlaybackSession get _playback => widget.handle.session;
   Drama get _drama => _playback.detail.drama;
   List<Episode> get _episodes => _playback.detail.episodes;
   bool get _touch => widget.padFullscreen != null;
-  bool get _fullscreen => widget.padFullscreen?.value ?? _windowFullscreen;
+  bool get _fullscreen => widget.padFullscreen?.value ?? false;
 
   @override
   void initState() {
@@ -67,10 +59,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _hintTimer?.cancel();
     _hint.dispose();
     _focus.dispose();
-    if (_windowFullscreen) {
-      widget.onWindowFullscreen?.call(false);
-      unawaited(_setFullScreen(false));
-    }
     super.dispose();
   }
 
@@ -79,13 +67,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _playback.setForeground(playerVisible(state));
   }
 
-  bool get _canDownload =>
-      AppScope.of(context).repository.supportsDownloads &&
-      widget.store.canDownload;
-
   bool get _roomy => MediaQuery.sizeOf(context).width - 32 >= 840;
-
-  Future<void> _setFullScreen(bool value) => setWindowFullScreen(value);
 
   Future<void> _toggleFullscreen() async {
     if (_playback.locked) return _say('已锁定，点屏幕显示锁图标');
@@ -94,11 +76,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _focus.requestFocus();
       return;
     }
-    final next = !_windowFullscreen;
-    widget.onWindowFullscreen?.call(next);
-    setState(() => _windowFullscreen = next);
-    _focus.requestFocus();
-    await _setFullScreen(next);
+    unawaited(Navigator.maybePop(context));
   }
 
   void _toggleWide() {
@@ -107,46 +85,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(widget.store.setPlayerWide(_wide).catchError((Object _) {}));
   }
 
-  bool get _filled => _fullscreen || _wide && !_selecting;
+  bool get _filled => _fullscreen || _wide;
 
   void _back() {
     if (_playback.locked) {
       _say('已锁定，点屏幕显示锁图标');
     } else if (_fullscreen) {
       unawaited(_toggleFullscreen());
-    } else if (_selecting) {
-      _endSelection();
     } else if (_wide) {
       _toggleWide();
     } else {
       unawaited(Navigator.maybePop(context));
     }
-  }
-
-  void _startSelection() {
-    setState(() {
-      _selecting = true;
-      _selected.clear();
-    });
-    _focus.requestFocus();
-  }
-
-  void _endSelection() {
-    setState(() {
-      _selecting = false;
-      _selected.clear();
-    });
-    _focus.requestFocus();
-  }
-
-  void _download() {
-    final episodes = [
-      for (final index in _selected.toList()..sort()) _episodes[index],
-    ];
-    _endSelection();
-    unawaited(
-      downloadEpisodes(context, widget.store, _playback.detail, episodes),
-    );
   }
 
   void _say(String text) {
@@ -261,9 +211,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         ),
       ),
     );
-    final panel = _roomy && (!_wide || _selecting);
+    final panel = _roomy && !_wide;
     return PopScope(
-      canPop: !_fullscreen && !_selecting && !_wide,
+      canPop: !_fullscreen && !_wide,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back();
       },
@@ -311,7 +261,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _header() {
-    final colors = Theme.of(context).colorScheme;
     return SizedBox(
       height: 64,
       child: Padding(
@@ -335,47 +284,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            if (_selecting) ...[
-              Text(
-                '已选 ${_selected.length} 集',
-                style: TextStyle(fontSize: 14, color: colors.onSurfaceVariant),
-              ),
-              TextButton(onPressed: _endSelection, child: const Text('取消')),
-              TextButton(
-                onPressed: () => setState(() {
-                  _selected.length == _episodes.length
-                      ? _selected.clear()
-                      : _selected.addAll(
-                          List.generate(_episodes.length, (index) => index),
-                        );
-                }),
-                child: Text(
-                  _selected.length == _episodes.length ? '取消全选' : '全选',
-                ),
-              ),
-              FilledButton.icon(
-                onPressed: _selected.isEmpty ? null : _download,
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('下载'),
-              ),
-            ] else ...[
-              FollowPill(
-                store: widget.store,
-                drama: _drama,
-                radius: 10,
-                onToggled: _focus.requestFocus,
-              ),
-              Semantics(
-                label: '下载选集',
-                button: true,
-                excludeSemantics: true,
-                child: IconButton(
-                  onPressed: _canDownload && _roomy ? _startSelection : null,
-                  icon: const Icon(Icons.download_rounded),
-                  style: IconButton.styleFrom(fixedSize: const Size.square(44)),
-                ),
-              ),
-            ],
+            FollowPill(
+              store: widget.store,
+              drama: _drama,
+              radius: 10,
+              onToggled: _focus.requestFocus,
+            ),
           ],
         ),
       ),
@@ -396,9 +310,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Widget _episodeList() => EpisodeGrid(
     episodes: _episodes,
     current: _playback.index,
-    selecting: _selecting,
-    selected: _selected,
-    onSelectionChanged: () => setState(() {}),
     onPick: (index) {
       if (index != _playback.index) unawaited(_playback.play(index));
     },

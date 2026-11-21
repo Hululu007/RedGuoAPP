@@ -9,7 +9,7 @@ from app_build import app, prepare_bundled_modules
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument('--platform', choices=['android', 'windows', 'darwin'], required=True)
+parser.add_argument('--platform', choices=['android'], default='android')
 parser.add_argument('--abi', action='append', choices=['arm64-v8a', 'armeabi-v7a', 'x86_64'])
 parser.add_argument('--bundle', action='append', default=[], help='内置模块目录，可多次指定；也可用逗号分隔写在环境变量 BUNDLED_MODULES 里')
 options = parser.parse_args()
@@ -41,7 +41,7 @@ def build(goos, architecture, compiler, output, extra=None):
                     *app.go_arguments, '-o', str(output), './bridge'],
                    cwd=root / 'native', env=build_env, check=True)
 
-if options.platform == 'android':
+if True:
     sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
     if not sdk:
         raise SystemExit('请设置 ANDROID_HOME 为 Android SDK 目录。')
@@ -63,28 +63,3 @@ if options.platform == 'android':
         if architecture == 'arm':
             extra['GOARM'] = '7'
         build('android', architecture, compiler, output, extra)
-elif options.platform == 'windows':
-    compiler = shutil.which('x86_64-w64-mingw32-gcc') or (shutil.which('gcc') if platform.system() == 'Windows' else None)
-    if not compiler:
-        raise SystemExit('请安装 MinGW-w64，并将其 bin 目录加入 PATH。')
-    build('windows', 'amd64', compiler, root / 'windows' / 'runner' / 'duanju_core.dll',
-          {'CGO_LDFLAGS': '-static-libgcc'})
-else:
-    if platform.system() != 'Darwin':
-        raise SystemExit('macOS 核心需要在 macOS 上构建。')
-    compiler = shutil.which('clang')
-    if not compiler:
-        raise SystemExit('需要安装 Xcode Command Line Tools。')
-    output = root / 'macos' / 'DuanjuCore' / 'libDuanjuCore.a'
-    slices = []
-    for architecture, triple in [('arm64', 'arm64-apple-macos12.0'), ('amd64', 'x86_64-apple-macos12.0')]:
-        library = root / 'native' / 'build' / 'macos' / architecture / 'libDuanjuCore.a'
-        library.parent.mkdir(parents=True, exist_ok=True)
-        print('Building ' + str(library.relative_to(root)), flush=True)
-        build_env = environment | {'GOOS': 'darwin', 'GOARCH': architecture, 'CC': str(compiler),
-                                   'CGO_CFLAGS': '-target ' + triple, 'CGO_LDFLAGS': '-target ' + triple}
-        subprocess.run([go, 'build', '-trimpath', '-buildmode=c-archive',
-                        *app.go_arguments, '-o', str(library), './bridge'],
-                       cwd=root / 'native', env=build_env, check=True)
-        slices.append(str(library))
-    subprocess.run(['lipo', '-create', *slices, '-output', str(output)], check=True)

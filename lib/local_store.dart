@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog_sort.dart';
 import 'diary_service.dart';
-import 'download_preferences.dart';
 import 'follow_state.dart';
 import 'hongguo_series.dart';
 import 'local_files.dart';
@@ -68,8 +67,6 @@ class LocalStore extends ChangeNotifier {
 
   final SharedPreferences preferences;
   final LocalFiles files;
-  static const _kernelRevisionKey = 'kernelDefault';
-  static const _kernelRevision = 2;
   final Future<String> Function(String pin, String salt) _pinHasher;
   final Map<String, WatchEntry> _history = {};
   final Map<String, Drama> _favorites = {};
@@ -190,10 +187,6 @@ class LocalStore extends ChangeNotifier {
         _userFile(id, 'settings'): {
           'source': ?text(key('source', id)),
           'playback': decoded<Map>(text(key('playback', id)), {}),
-          'downloadPreferences': decoded<Map>(
-            text(key('downloadPreferences', id)),
-            {},
-          ),
           'recentSearches': decoded<List>(text(key('recentSearches', id)), []),
         },
       });
@@ -262,26 +255,6 @@ class LocalStore extends ChangeNotifier {
         _followChecks[entry.key] = FollowCheck.fromJson(entry.value);
       } catch (_) {}
     }
-    await _migratePlaybackKernel(id);
-  }
-
-  /// 旧版本以 MPV 为默认内核，切换默认值后把沿用默认的用户迁移到 ExoPlayer，
-  /// 每个用户只执行一次；之后在设置里改回 MPV 不会再被覆盖。
-  Future<void> _migratePlaybackKernel(String id) async {
-    if (_userSettings[_kernelRevisionKey] == _kernelRevision) return;
-    final playback = _map(_userSettings['playback']);
-    final legacyKernel = playback['playbackKernel'];
-    final updated = <String, Object?>{
-      ..._userSettings,
-      _kernelRevisionKey: _kernelRevision,
-      if (legacyKernel == PlaybackKernel.mpv.name)
-        'playback': <String, Object?>{
-          ...playback,
-          'playbackKernel': PlaybackKernel.exo.name,
-        },
-    };
-    await _write(_userFile(id, 'settings'), updated);
-    _userSettings = updated;
   }
 
   static List<LocalProfile> _readProfiles(dynamic records) {
@@ -305,9 +278,7 @@ class LocalStore extends ChangeNotifier {
   void _block(String message) {
     _configurationError = message;
     _locked = true;
-    _profiles = [
-      const LocalProfile(id: 'default', name: '配置待恢复', download: false),
-    ];
+    _profiles = [const LocalProfile(id: 'default', name: '配置待恢复')];
     _current = 'default';
     _forceLogin = null;
     _history.clear();
@@ -363,7 +334,6 @@ class LocalStore extends ChangeNotifier {
     return _forceLogin ?? admin.protected;
   }
 
-  bool get canDownload => !locked && (profile.admin || profile.download);
   bool get adminProtected =>
       _profiles.firstWhere((profile) => profile.admin).protected;
 
@@ -496,21 +466,6 @@ class LocalStore extends ChangeNotifier {
   bool get playerWide => preferences.getBool('playerWide') ?? false;
   double get playerVolume => preferences.getDouble('playerVolume') ?? 100;
 
-  /// 该设备上 ExoPlayer 硬解过不了 HEVC 等片源，播放会话检测到后置位，
-  /// 之后开播直接走 MPV；在设置里重新选回 Exo 会清掉这个标记。
-  bool get exoDecoderBroken => _flag('exoDecoderBroken', false);
-  ({double left, double top, double extent})? get miniWindow {
-    final values = preferences
-        .getString('miniWindow')
-        ?.split(',')
-        .map(double.tryParse)
-        .toList();
-    if (values == null || values.length != 3 || values.contains(null)) {
-      return null;
-    }
-    return (left: values[0]!, top: values[1]!, extent: values[2]!);
-  }
-
   bool get televisionKeyboard => _flag('televisionKeyboard', false);
   bool get historyTab => _flag('historyTab', true);
   bool get pureBlack => _flag('pureBlack', false);
@@ -546,17 +501,6 @@ class LocalStore extends ChangeNotifier {
     return sources.any((site) => site.id == value)
         ? value as String
         : sources.firstOrNull?.id ?? '';
-  }
-
-  DownloadPreferences get downloadPreferences {
-    if (locked) return const DownloadPreferences();
-    try {
-      return DownloadPreferences.fromJson(
-        Map<String, dynamic>.from(_userSettings['downloadPreferences'] as Map),
-      );
-    } catch (_) {
-      return const DownloadPreferences();
-    }
   }
 
   PlaybackPreferences get playbackPreferences {
@@ -657,16 +601,6 @@ class LocalStore extends ChangeNotifier {
   });
   Future<void> setPlayerVolume(double value) =>
       _queue(() => preferences.setDouble('playerVolume', value));
-  Future<void> setExoDecoderBroken(bool value) =>
-      _setting('exoDecoderBroken', value);
-  Future<void> setMiniWindow(
-    ({double left, double top, double extent}) value,
-  ) => _queue(
-    () => preferences.setString(
-      'miniWindow',
-      '${value.left},${value.top},${value.extent}',
-    ),
-  );
   Future<void> setTelevisionKeyboard(bool value) =>
       _setting('televisionKeyboard', value);
   Future<void> setHistoryTab(bool value) => _setting('historyTab', value);
@@ -700,17 +634,43 @@ class LocalStore extends ChangeNotifier {
       _setting('ignoredUpdate', version);
   Future<void> setPlaybackPreferences(PlaybackPreferences value) async {
     PlaybackPreferences.fromJson(value.toJson());
-    final retryExo =
-        value.playbackKernel == PlaybackKernel.exo &&
-        playbackPreferences.playbackKernel != PlaybackKernel.exo;
     await _userSetting('playback', value.toJson());
-    // 用户主动选回 ExoPlayer，说明想再试一次，清掉之前的解码失败标记。
-    if (retryExo) await _setting('exoDecoderBroken', false);
   }
 
-  Future<void> setDownloadPreferences(DownloadPreferences value) {
-    DownloadPreferences.fromJson(value.toJson());
-    return _userSetting('downloadPreferences', value.toJson());
+  /// 手机端播放偏好默认值升级（一次性）。
+  ///
+  /// 新版把竖屏样式、上下滑切集的默认值改为开启、亮度/音量滑动改为关闭，但
+  /// 老设备早已把旧默认值整体存进了偏好文件，单纯改默认值感知不到。这里在
+  /// 升级后首次运行时把这三项翻新成新默认，之后用户在设置里的任何手动修改
+  /// 都照常生效、不会再被覆盖。
+  ///
+  /// 注意：本方法本身在写队列里执行，**不能**在任务内部再调 setPlaybackPreferences
+  /// / _userSetting 这类同样进队列的方法——内层任务排在外层后面，外层又在等
+  /// 内层，会直接死锁，表现为应用卡在启动页打不开。
+  Future<void> upgradePhonePlaybackDefaults() {
+    if (locked) return Future.value();
+    if (_userSettings['phonePlaybackDefaults'] != null) {
+      return Future.value();
+    }
+    final epoch = _epoch;
+    return _queue(() async {
+      if (locked || epoch != _epoch) return;
+      if (_userSettings['phonePlaybackDefaults'] != null) return;
+      final settings = {
+        ..._userSettings,
+        'playback': playbackPreferences
+            .copyWith(
+              portraitStyleForWide: true,
+              swipeLevels: false,
+              swipeEpisodes: true,
+            )
+            .toJson(),
+        'phonePlaybackDefaults': true,
+      };
+      await _write(_userFile(_current, 'settings'), settings);
+      _userSettings = settings;
+      _notify();
+    });
   }
 
   Future<void> _saveStates(Map<String, FollowState> states) async {
@@ -1008,7 +968,6 @@ class LocalStore extends ChangeNotifier {
     String? id,
     required String name,
     required List<String> sources,
-    required bool download,
     String? pin,
   }) => _queue(() async {
     _requireAdmin();
@@ -1050,7 +1009,6 @@ class LocalStore extends ChangeNotifier {
       name: cleanName,
       admin: targetId == 'default',
       sources: sources.toSet().toList(),
-      download: download,
       salt: salt,
       pinHash: hash,
     );
@@ -1100,7 +1058,6 @@ class LocalStore extends ChangeNotifier {
           ..removeWhere((id, _) => !ids.contains(id)),
         'source': settings['source'] is String ? settings['source'] : '',
         'playback': _map(settings['playback']),
-        'downloadPreferences': _map(settings['downloadPreferences']),
         'recentSearches': _list(settings['recentSearches']),
       };
     }
@@ -1221,9 +1178,6 @@ class LocalStore extends ChangeNotifier {
       PlaybackPreferences.fromJson(
         Map<String, dynamic>.from(library['playback'] as Map? ?? {}),
       );
-      DownloadPreferences.fromJson(
-        Map<String, dynamic>.from(library['downloadPreferences'] as Map? ?? {}),
-      );
       final searches = library['recentSearches'] as List? ?? [];
       if (searches.length > 20 ||
           searches.any(
@@ -1275,7 +1229,6 @@ class LocalStore extends ChangeNotifier {
         _userFile(profile.id, 'settings'): {
           'source': library['source'],
           'playback': library['playback'] ?? {},
-          'downloadPreferences': library['downloadPreferences'] ?? {},
           'recentSearches': library['recentSearches'] ?? [],
         },
       });

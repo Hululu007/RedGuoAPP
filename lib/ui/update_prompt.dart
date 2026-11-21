@@ -83,9 +83,7 @@ Future<void> checkUpdateManually(BuildContext context, LocalStore store) async {
   }
   if (!await _matchesUpdateSignature(update)) {
     if (context.mounted) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('更新签名不匹配，已拒绝此次更新')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('更新签名不匹配，已拒绝此次更新')));
     }
     return;
   }

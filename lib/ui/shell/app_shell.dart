@@ -3,9 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../download_converter.dart';
-import '../../merge_queue.dart';
-import '../../download_overview.dart';
 import '../../follow_updater.dart';
 import '../../local_store.dart';
 import '../../models.dart';
@@ -89,9 +86,6 @@ class _AppShellState extends State<AppShell> {
   var _headerFocused = false;
   FocusNode? _lastFocus;
   Timer? _exitWindow;
-  DownloadOverview? _downloads;
-  DownloadConverter? _converter;
-  MergeQueue? _merges;
   FollowUpdater? _followUpdater;
 
   NavigatorState? get _navigator => _navigators[_tab.index].currentState;
@@ -116,16 +110,6 @@ class _AppShellState extends State<AppShell> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _downloads ??= DownloadOverview(
-      AppScope.of(context).repository,
-      widget.store,
-    );
-    _converter ??= DownloadConverter(
-      AppScope.of(context).repository,
-      _downloads!,
-    );
-    _merges ??= MergeQueue(AppScope.of(context).repository)
-      ..onFinished = _mergeFinished;
     _followUpdater ??= FollowUpdater(
       AppScope.of(context).repository,
       widget.store,
@@ -148,9 +132,6 @@ class _AppShellState extends State<AppShell> {
     _mineEntry.dispose();
     _header.dispose();
     _exitWindow?.cancel();
-    _converter?.dispose();
-    _merges?.dispose();
-    _downloads?.dispose();
     _followUpdater?.dispose();
     super.dispose();
   }
@@ -184,19 +165,6 @@ class _AppShellState extends State<AppShell> {
         ),
       );
     }
-  }
-
-  void _mergeFinished(MergeTask task) {
-    if (task.state == MergeState.cancelled) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(
-        content: Text(
-          task.state == MergeState.done
-              ? '「${task.fileName}」${task.message}'
-              : '「${task.fileName}」合并失败：${task.message}',
-        ),
-      ),
-    );
   }
 
   void _followFocus() {
@@ -249,9 +217,6 @@ class _AppShellState extends State<AppShell> {
     AppTab.history => HistoryPage(store: widget.store, root: true),
     AppTab.mine => MinePage(
       store: widget.store,
-      downloads: _downloads!,
-      converter: _converter!,
-      merges: _merges!,
       entryFocus: _mineEntry,
       onExitUp: _tabFocus[AppTab.mine.index].requestFocus,
     ),
@@ -320,8 +285,8 @@ class _AppShellState extends State<AppShell> {
                     for (final tab in tabs)
                       NavigationDestination(
                         key: ValueKey('nav-${tab.name}'),
-                        icon: _badged(tab, Icon(tab.icon)),
-                        selectedIcon: _badged(tab, Icon(tab.selectedIcon)),
+                        icon: Icon(tab.icon),
+                        selectedIcon: Icon(tab.selectedIcon),
                         label: tab.label,
                       ),
                   ],
@@ -372,10 +337,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _badged(AppTab tab, Widget icon) => tab == AppTab.mine
-      ? _DownloadBadge(downloads: _downloads!, child: icon)
-      : icon;
-
   Widget _televisionHeader() {
     final tabs = Row(
       key: _televisionTabs,
@@ -415,7 +376,6 @@ class _AppShellState extends State<AppShell> {
             tabs: _tabs,
             selected: _tab,
             expanded: expanded,
-            badged: _badged,
             onSelect: _tap,
             onToggle: roomy
                 ? () => widget.store.setSideBarExpanded(!expanded)
@@ -494,14 +454,12 @@ class _SideBar extends StatefulWidget {
     required this.tabs,
     required this.selected,
     required this.expanded,
-    required this.badged,
     required this.onSelect,
     this.onToggle,
   });
   final List<AppTab> tabs;
   final AppTab selected;
   final bool expanded;
-  final Widget Function(AppTab tab, Widget icon) badged;
   final ValueChanged<AppTab> onSelect;
   final VoidCallback? onToggle;
 
@@ -570,7 +528,6 @@ class _SideBarState extends State<_SideBar> {
                     selected: tab == widget.selected,
                     expanded: expanded,
                     metrics: metrics,
-                    badged: widget.badged,
                     onTap: () => widget.onSelect(tab),
                   ),
               ],
@@ -588,14 +545,12 @@ class _SideItem extends StatelessWidget {
     required this.selected,
     required this.expanded,
     required this.metrics,
-    required this.badged,
     required this.onTap,
   });
   final AppTab tab;
   final bool selected;
   final bool expanded;
   final _SideMetrics metrics;
-  final Widget Function(AppTab tab, Widget icon) badged;
   final VoidCallback onTap;
 
   @override
@@ -605,15 +560,12 @@ class _SideItem extends StatelessWidget {
     final color = selected
         ? colors.onSecondaryContainer
         : colors.onSurfaceVariant;
-    final icon = badged(
-      tab,
-      ToggleIconSwitcher(
-        child: Icon(
-          selected ? tab.selectedIcon : tab.icon,
-          key: ValueKey(selected),
-          color: color,
-          size: metrics.iconSize,
-        ),
+    final icon = ToggleIconSwitcher(
+      child: Icon(
+        selected ? tab.selectedIcon : tab.icon,
+        key: ValueKey(selected),
+        color: color,
+        size: metrics.iconSize,
       ),
     );
     final duration = Motion.of(context, Motion.medium);
@@ -688,31 +640,6 @@ class _SideItem extends StatelessWidget {
       ),
     );
   }
-}
-
-class _DownloadBadge extends StatelessWidget {
-  const _DownloadBadge({required this.downloads, required this.child});
-  final DownloadOverview downloads;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: downloads,
-    builder: (context, child) {
-      final count = downloads.active;
-      return Badge(
-        isLabelVisible: count > 0,
-        label: ToggleIconSwitcher(
-          child: Text(
-            count > 99 ? '99+' : '$count',
-            key: ValueKey(count > 99 ? 100 : count),
-          ),
-        ),
-        child: child,
-      );
-    },
-    child: child,
-  );
 }
 
 class _TelevisionTab extends StatelessWidget {

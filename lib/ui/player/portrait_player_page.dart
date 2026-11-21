@@ -10,8 +10,6 @@ import '../../models.dart';
 import '../../playback_preferences.dart';
 import '../../playback_engine.dart';
 import '../../playback_session.dart';
-import '../app_scope.dart';
-import '../downloads/download_actions.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../widgets/contained_slider.dart';
@@ -182,7 +180,6 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
 
   void _syncSystemBars() {
     final immersive =
-        !desktopPlatform &&
         _session.store.playbackPreferences.hideSystemBars &&
         !_chromeShown;
     if (immersive == _immersive) return;
@@ -438,14 +435,6 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
     (_) => _EpisodeSheet(
       session: _session,
       onSeasons: () => unawaited(_openSeasons()),
-      canDownload:
-          AppScope.of(context).repository.supportsDownloads &&
-          widget.store.canDownload,
-      onDownload: (indexes) => unawaited(
-        downloadEpisodes(context, widget.store, _session.detail, [
-          for (final index in indexes) _session.detail.episodes[index],
-        ]),
-      ),
     ),
   );
 
@@ -562,7 +551,6 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
                 curve: Motion.standard,
                 child: PlayerVideo(
                   key: ValueKey(player),
-                  handle: widget.handle,
                   player: player,
                   fit: session.videoFit,
                 ),
@@ -584,7 +572,8 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        if (current) const CircularProgressIndicator(),
+                        // 起播等待由全屏的 PlaybackLoading 统一显示（转圈+进度文案），
+                        // 这里再画一个会出现「一亮一暗两个转圈」的叠影。
                       ],
                     ),
                   )
@@ -684,7 +673,13 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
         ),
         FadePresence(
           duration: Motion.medium,
-          child: session.ready && session.stalled
+          child: session.booting
+              ? PlaybackLoading(session: session)
+              : null,
+        ),
+        FadePresence(
+          duration: Motion.medium,
+          child: session.ready && session.stalled && session.started
               ? const IgnorePointer(
                   child: Center(child: CircularProgressIndicator()),
                 )
@@ -927,7 +922,7 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
           color: Colors.white,
           activeColor: Theme.of(context).colorScheme.primaryFixedDim,
         ),
-        if (!desktopPlatform) PlayerLockButton(locked: false, onPressed: _lock),
+        PlayerLockButton(locked: false, onPressed: _lock),
       ],
     );
   }
@@ -1145,117 +1140,53 @@ class _Shade extends StatelessWidget {
 }
 
 class _EpisodeSheet extends StatefulWidget {
-  const _EpisodeSheet({
-    required this.session,
-    required this.onSeasons,
-    required this.canDownload,
-    required this.onDownload,
-  });
+  const _EpisodeSheet({required this.session, required this.onSeasons});
   final PlaybackSession session;
   final VoidCallback onSeasons;
-  final bool canDownload;
-  final ValueChanged<List<int>> onDownload;
 
   @override
   State<_EpisodeSheet> createState() => _EpisodeSheetState();
 }
 
 class _EpisodeSheetState extends State<_EpisodeSheet> {
-  final _selected = <int>{};
-  bool _selecting = false;
-
   PlaybackSession get _session => widget.session;
-
-  void _select(bool selecting) => setState(() {
-    _selecting = selecting;
-    _selected.clear();
-  });
 
   @override
   Widget build(BuildContext context) {
     final episodes = _session.detail.episodes;
-    final all = _selected.length == episodes.length;
-    return PopScope(
-      canPop: !_selecting,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _select(false);
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SheetHeader(
-            children: _selecting
-                ? [
-                    Expanded(
-                      child: Text(
-                        '已选 ${_selected.length} 集',
-                        style: sheetTitle,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => _select(false),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () => setState(() {
-                        all
-                            ? _selected.clear()
-                            : _selected.addAll(
-                                List.generate(episodes.length, (i) => i),
-                              );
-                      }),
-                      child: Text(all ? '取消全选' : '全选'),
-                    ),
-                    FilledButton(
-                      onPressed: _selected.isEmpty
-                          ? null
-                          : () {
-                              final indexes = _selected.toList()..sort();
-                              Navigator.pop(context);
-                              widget.onDownload(indexes);
-                            },
-                      child: const Text('下载'),
-                    ),
-                  ]
-                : [
-                    const Expanded(child: Text('选集', style: sheetTitle)),
-                    if (widget.canDownload)
-                      IconButton(
-                        onPressed: () => _select(true),
-                        icon: const Icon(Icons.download_rounded),
-                        tooltip: '下载选集',
-                      ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
-                      tooltip: '关闭',
-                    ),
-                  ],
-          ),
-          Expanded(
-            child: ListenableBuilder(
-              listenable: _session,
-              builder: (context, _) => EpisodeGrid(
-                header: !_selecting && _session.detail.seasons.isNotEmpty
-                    ? _seasonBar(context)
-                    : null,
-                episodes: episodes,
-                current: _session.index,
-                selecting: _selecting,
-                selected: _selected,
-                touch: true,
-                onSelectionChanged: () => setState(() {}),
-                onPick: (index) {
-                  Navigator.pop(context);
-                  if (index != _session.index) {
-                    unawaited(_session.play(index));
-                  }
-                },
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SheetHeader(
+          children: [
+            const Expanded(child: Text('选集', style: sheetTitle)),
+            IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded),
+              tooltip: '关闭',
+            ),
+          ],
+        ),
+        Expanded(
+          child: ListenableBuilder(
+            listenable: _session,
+            builder: (context, _) => EpisodeGrid(
+              header: _session.detail.seasons.isNotEmpty
+                  ? _seasonBar(context)
+                  : null,
+              episodes: episodes,
+              current: _session.index,
+              touch: true,
+              onPick: (index) {
+                Navigator.pop(context);
+                if (index != _session.index) {
+                  unawaited(_session.play(index));
+                }
+              },
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

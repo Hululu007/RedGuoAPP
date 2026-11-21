@@ -4,15 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../app_build.dart';
 import '../../app_device.dart';
-import '../../core_bridge.dart';
-import '../../download_preferences.dart';
 import '../../local_store.dart';
 import '../../media_controls.dart';
 import '../../playback_preferences.dart';
 import '../../resource_settings.dart';
 import '../../resource_settings_editor.dart';
 import '../../update_channel.dart';
-import '../../window_on_top.dart';
 import '../app_scope.dart';
 import '../player/danmaku_settings.dart';
 import '../update_prompt.dart';
@@ -23,16 +20,14 @@ import '../widgets/group_card.dart';
 import 'about_notice_view.dart';
 import 'appearance_settings.dart';
 import 'backup_actions.dart';
-import 'boss_key_tile.dart';
 import 'diary_view.dart';
 import 'settings_rows.dart';
-import 'storage_view.dart';
+import 'data_card.dart';
 
 enum SettingsGroup {
   appearance('外观', Icons.palette_outlined),
   playback('播放', Icons.play_arrow_rounded),
   danmaku('弹幕', Icons.subtitles_outlined),
-  download('下载', Icons.download_rounded),
   storage('存储', Icons.folder_outlined),
   proxy('网络', Icons.language_rounded),
   users('用户', Icons.manage_accounts_outlined),
@@ -47,7 +42,6 @@ enum SettingsGroup {
 typedef OpenSubpage = void Function(String title, WidgetBuilder body);
 
 const adminOnly = '需要管理员';
-const _noDownload = '当前用户没有下载权限';
 const _proxyModes = {'auto': '自动', 'direct': '直连', 'manual': '手动代理'};
 const _dnsProviders = {
   'system': '系统',
@@ -55,11 +49,11 @@ const _dnsProviders = {
   'ali': '阿里',
   'google': '谷歌',
 };
-const _counts = {1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6'};
+const playbackQualities = [0, 1080, 720, 480];
 const _decoders = {
-  TelevisionDecoder.optimized: '默认',
-  TelevisionDecoder.hardware: '硬解（兼容）',
-  TelevisionDecoder.software: '软解（兼容）',
+  TelevisionDecoder.optimized: '自动（优先硬解）',
+  TelevisionDecoder.hardware: '仅硬解',
+  TelevisionDecoder.software: '仅软解',
 };
 
 class SettingsSection extends StatelessWidget {
@@ -89,7 +83,6 @@ class SettingsSection extends StatelessWidget {
             children: switch (group) {
               SettingsGroup.playback => _playback(context),
               SettingsGroup.danmaku => _danmaku(context),
-              SettingsGroup.download => _download(context),
               SettingsGroup.storage => _storage(),
               SettingsGroup.proxy => _network(context),
               SettingsGroup.users => [UsersView(store: store, open: open)],
@@ -102,7 +95,7 @@ class SettingsSection extends StatelessWidget {
 
   Widget? _editorError() => switch (editor.error) {
     final error? => SettingsTile(
-      title: '无法读取网络与下载设置',
+      title: '无法读取网络设置',
       subtitle: error,
       trailing: const Icon(Icons.refresh_rounded),
       onTap: editor.load,
@@ -169,7 +162,7 @@ class SettingsSection extends StatelessWidget {
             subtitle: '指定清晰度不可用时，使用源站可用画质',
             options: {
               for (final quality in {
-                ...DownloadPreferences.qualities,
+                ...playbackQualities,
                 preferences.quality,
               }.toList()..sort((a, b) => b - a))
                 quality: quality == 0 ? '自动（优先高清）' : '${quality}P',
@@ -182,22 +175,9 @@ class SettingsSection extends StatelessWidget {
       ),
       SettingsCard(
         children: [
-          if (Platform.isAndroid)
-            ValueTile<PlaybackKernel>(
-              title: '播放内核',
-              subtitle:
-                  'ExoPlayer 更省电、打开更快，MPV 兼容性更好；ExoPlayer 解不了片源时会自动改用 MPV 续播',
-              options: {
-                for (final kernel in PlaybackKernel.values)
-                  kernel: kernel.label,
-              },
-              value: preferences.playbackKernel,
-              onChanged: (kernel) =>
-                  savePreferences(preferences.copyWith(playbackKernel: kernel)),
-            ),
           ValueTile<TelevisionDecoder>(
             title: '解码方式',
-            subtitle: '有声音没画面或卡顿时可换兼容方式，下次打开视频时生效',
+            subtitle: '自动会在硬解失败时换别的解码器；仅硬解解不了会直接报错，下次打开视频时生效',
             options: _decoders,
             value: preferences.televisionDecoder,
             onChanged: (decoder) => savePreferences(
@@ -207,7 +187,7 @@ class SettingsSection extends StatelessWidget {
           if (Platform.isAndroid) const _RenderingTile(),
           SwitchTile(
             title: '预开下一集',
-            subtitle: '提前打开下一集的播放器，切集无需等待',
+            subtitle: '提前准备下一集，切集无需等待',
             value: preferences.preopens(television: television),
             onChanged: (value) =>
                 savePreferences(preferences.copyWith(preopen: value)),
@@ -215,9 +195,7 @@ class SettingsSection extends StatelessWidget {
           if (!television)
             SwitchTile(
               title: '横屏视频也使用竖屏样式',
-              subtitle: Platform.isAndroid || Platform.isIOS
-                  ? '竖屏观看横屏视频时画面居中，上下滑动切集，点选集右边的按钮进入全屏'
-                  : '窗口竖长时横屏视频画面居中，滚轮切集，点选集右边的按钮进入全屏',
+              subtitle: '竖屏观看横屏视频时画面居中，上下滑动切集，点选集右边的按钮进入全屏',
               value: preferences.portraitStyleForWide,
               onChanged: (value) => savePreferences(
                 preferences.copyWith(portraitStyleForWide: value),
@@ -225,7 +203,7 @@ class SettingsSection extends StatelessWidget {
             ),
         ],
       ),
-      if ((Platform.isAndroid || Platform.isIOS) && !television)
+      if (!television)
         SettingsCard(
           children: [
             SwitchTile(
@@ -294,7 +272,7 @@ class SettingsSection extends StatelessWidget {
           ),
           SwitchTile(
             title: '全屏显示网速',
-            subtitle: '全屏播放时在画面顶部显示当前下载速度',
+            subtitle: '全屏播放时在画面顶部显示当前网络速度',
             value: preferences.showNetworkSpeed,
             onChanged: (value) =>
                 savePreferences(preferences.copyWith(showNetworkSpeed: value)),
@@ -306,9 +284,7 @@ class SettingsSection extends StatelessWidget {
           children: [
             SwitchTile(
               title: '后台播放',
-              subtitle: Platform.isAndroid || Platform.isIOS
-                  ? '离开应用或锁屏后继续播放，可在通知栏、锁屏和耳机上控制'
-                  : '最小化后继续播放，可用键盘媒体键和系统媒体控件控制',
+              subtitle: '离开应用或锁屏后继续播放，可在通知栏、锁屏和耳机上控制',
               value: preferences.backgroundPlayback,
               onChanged: (value) => savePreferences(
                 preferences.copyWith(backgroundPlayback: value),
@@ -329,141 +305,10 @@ class SettingsSection extends StatelessWidget {
             ),
           ],
         ),
-      if (Platform.isWindows || Platform.isMacOS)
-        SettingsCard(
-          children: [
-            ValueListenableBuilder(
-              valueListenable: windowOnTop,
-              builder: (context, enabled, _) => SwitchTile(
-                title: '窗口置顶',
-                subtitle: '窗口始终显示在其他窗口上方，重启应用后仍然生效',
-                value: enabled,
-                onChanged: (value) =>
-                    saveSetting(context, () => setWindowOnTop(value)),
-              ),
-            ),
-            const BossKeyTile(),
-          ],
-        ),
     ];
   }
 
-  List<Widget> _download(BuildContext context) {
-    final canDownload = store.canDownload;
-    final admin = store.profile.admin;
-    final preferences = store.downloadPreferences;
-    final settings = editor.settings;
-    final editable = settings != null && !editor.saving;
-    void savePreferences(DownloadPreferences next) =>
-        saveSetting(context, () => store.setDownloadPreferences(next));
-    return [
-      SettingsCard(
-        children: [
-          ValueTile<int>(
-            title: '默认画质',
-            subtitle: canDownload ? '指定画质不可用时，使用源站可用画质' : _noDownload,
-            options: {
-              for (final quality in DownloadPreferences.qualities)
-                quality: quality == 0 ? '自动（优先高清）' : '${quality}P',
-            },
-            value: preferences.quality,
-            onChanged: canDownload
-                ? (quality) =>
-                      savePreferences(preferences.copyWith(quality: quality))
-                : null,
-          ),
-          SwitchTile(
-            title: '默认包含 VIP 集',
-            subtitle: canDownload ? 'VIP 集可能仅提供试看内容，下载前仍可调整选择' : _noDownload,
-            value: preferences.includeVip,
-            onChanged: canDownload
-                ? (value) =>
-                      savePreferences(preferences.copyWith(includeVip: value))
-                : null,
-          ),
-        ],
-      ),
-      SettingsCard(
-        children: [
-          ?_editorError(),
-          ValueTile<int>(
-            title: '同时下载数量',
-            subtitle: admin ? null : adminOnly,
-            options: _counts,
-            value: settings?.downloadConcurrency,
-            onChanged: editable
-                ? (value) => _saveResource(
-                    context,
-                    settings.copyWith(downloadConcurrency: value),
-                  )
-                : null,
-          ),
-          SwitchTile(
-            title: '按站源分类保存',
-            subtitle: admin ? '新任务放入各站源的子目录，已有下载继续使用原位置' : adminOnly,
-            value: settings?.downloadBySource ?? false,
-            onChanged: editable
-                ? (value) => _saveResource(
-                    context,
-                    settings.copyWith(downloadBySource: value),
-                  )
-                : null,
-          ),
-        ],
-      ),
-      if (Platform.isAndroid)
-        SettingsCard(
-          children: [
-            SwitchTile(
-              title: '下载完成后自动导出',
-              subtitle: canDownload
-                  ? '导出到 Movies/剧名/，相册和文件管理器可见，卸载后保留'
-                  : _noDownload,
-              value: store.autoExport,
-              onChanged: canDownload
-                  ? (value) => _setAutoExport(context, value)
-                  : null,
-            ),
-            SwitchTile(
-              title: '自动导出后删除 App 内副本',
-              subtitle: canDownload ? '删除后 App 内不能再离线播放' : _noDownload,
-              value: store.deleteAfterAutoExport,
-              onChanged: canDownload
-                  ? (value) => saveSetting(
-                      context,
-                      () => store.setDeleteAfterAutoExport(value),
-                    )
-                  : null,
-            ),
-            SwitchTile(
-              title: '手动导出后删除 App 内副本',
-              subtitle: canDownload ? '在已下载剧页「编辑」里点「导出」后删除' : _noDownload,
-              value: store.deleteAfterManualExport,
-              onChanged: canDownload
-                  ? (value) => saveSetting(
-                      context,
-                      () => store.setDeleteAfterManualExport(value),
-                    )
-                  : null,
-            ),
-          ],
-        ),
-      if (Platform.isIOS) const _Note('iOS 下载和媒体处理需要保持应用在前台；切到后台会暂停，回到前台后可继续。'),
-    ];
-  }
-
-  Future<void> _setAutoExport(BuildContext context, bool value) =>
-      saveSetting(context, () async {
-        if (value && !await AppDevice.requestVideoExport()) {
-          throw AppFailure('未获得存储权限，无法自动导出');
-        }
-        await store.setAutoExport(value);
-      });
-
-  List<Widget> _storage() => [
-    if (!store.canDownload) const _Note(_noDownload),
-    StorageView(store: store),
-  ];
+  List<Widget> _storage() => [DataCard(store: store, onCleared: () {})];
 
   List<Widget> _network(BuildContext context) {
     final admin = store.profile.admin;
@@ -478,7 +323,7 @@ class SettingsSection extends StatelessWidget {
           ?_editorError(),
           ValueTile<String>(
             title: 'DNS 服务商',
-            subtitle: '站源访问与下载使用的域名解析服务，改动立即生效',
+            subtitle: '站源访问使用的域名解析服务，改动立即生效',
             options: _dnsProviders,
             value: settings?.dnsProvider,
             onChanged: editable
@@ -781,9 +626,7 @@ class _BackupCardState extends State<_BackupCard> {
         ),
         SettingsTile(
           title: '恢复备份',
-          subtitle: admin
-              ? '替换本机的用户、追剧、观看记录、设置和站源开关，已下载视频保留，完成后可安装备份里的模块'
-              : adminOnly,
+          subtitle: admin ? '替换本机的用户、追剧、观看记录、设置和站源开关，完成后可安装备份里的模块' : adminOnly,
           enabled: admin && !_busy,
           onTap: () => _run(() => restoreBackupFile(context, widget.store)),
         ),
@@ -815,7 +658,7 @@ class _RenderingTileState extends State<_RenderingTile> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(enabled ? '开启兼容渲染模式？' : '关闭兼容渲染模式？'),
-        content: const Text('需要重启应用才能生效，正在进行的下载会中断。'),
+        content: const Text('需要重启应用才能生效。'),
         actions: [
           FocusRing(
             radius: 20,

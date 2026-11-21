@@ -36,22 +36,6 @@ def save(image, name):
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination)
 
-contents = json.loads((root / 'ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json').read_text())
-for entry in contents['images']:
-    if 'filename' in entry:
-        size = round(float(entry['size'].split('x')[0]) * float(entry['scale'].rstrip('x')))
-        save(icon.resize((size, size), Image.Resampling.LANCZOS),
-             'ios/Runner/Assets.xcassets/AppIcon.appiconset/' + entry['filename'])
-save(rounded.resize((256, 256), Image.Resampling.LANCZOS), 'windows/runner/resources/app_icon.ico')
-macos_canvas = Image.new('RGBA', (1024, 1024))
-macos_badge = rounded.resize((824, 824), Image.Resampling.LANCZOS)
-macos_canvas.paste(macos_badge, (100, 100), macos_badge)
-macos_contents = json.loads((root / 'macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json').read_text())
-for entry in macos_contents['images']:
-    if 'filename' in entry:
-        size = round(float(entry['size'].split('x')[0]) * float(entry['scale'].rstrip('x')))
-        save(macos_canvas.resize((size, size), Image.Resampling.LANCZOS),
-             'macos/Runner/Assets.xcassets/AppIcon.appiconset/' + entry['filename'])
 for density, scale in [('mdpi', 1), ('hdpi', 1.5), ('xhdpi', 2), ('xxhdpi', 3), ('xxxhdpi', 4)]:
     legacy = round(48 * scale)
     layer = round(108 * scale)

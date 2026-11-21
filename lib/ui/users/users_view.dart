@@ -20,8 +20,7 @@ String profileSummary(LocalProfile profile) {
     for (final site in SourceSite.values)
       if (profile.sources.contains(site.id)) site.name,
   ];
-  return '${sources.isEmpty ? '未开放站源' : sources.join(' / ')} · '
-      '${profile.download ? '可下载' : '仅在线观看'}';
+  return sources.isEmpty ? '未开放站源' : sources.join(' / ');
 }
 
 Future<void> switchToProfile(
@@ -125,7 +124,7 @@ class UsersView extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              '各用户的追剧和观看记录独立保存，下载文件由本机共享。轻点用户即可切换，有密码的用户需要先验证。',
+              '各用户的追剧和观看记录独立保存。轻点用户即可切换，有密码的用户需要先验证。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 height: 1.6,

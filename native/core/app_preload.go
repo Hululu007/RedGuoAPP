@@ -20,7 +20,9 @@ const nativePreloadLimit = 4 << 20
 func (engine *nativeEngine) nativePreload(ctx context.Context, input nativeInput) (nativePlan, error) {
 	ctx = context.WithValue(ctx, BackgroundCatalogKey{}, true)
 	ctx = context.WithValue(ctx, nativePreloadKey{}, true)
-	plan, err := engine.nativeResolve(ctx, input)
+	// 不走 nativeResolve（其内部 nativeBeginPlayback 会按 playback 序列号
+	// 判过期，预加载的读取序列号永远过不了这道门）。生命周期由 beginRead 管理。
+	plan, err := engine.resolveIntoPlan(ctx, input)
 	if err != nil || plan.Local {
 		return plan, err
 	}
@@ -29,6 +31,15 @@ func (engine *nativeEngine) nativePreload(ctx context.Context, input nativeInput
 	stream := engine.stream
 	engine.mu.Unlock()
 	if exists && stream != nil && choice.streamSession != "" {
+		// 预热的会话也要下发解密密钥：否则备用播放器 prepare 时拿到的是
+		// 密文，切过去必然解码失败再走一遍完整打开；同时下面的预取抓到的
+		// 也是密文字节，白占带宽。顺带触发 CENC 布局的后台预热，
+		// 让切集时首字节不用再等 moov 解析。
+		if index := choice.index; index >= 0 && index < len(choice.media) {
+			if key := choice.media[index].CENCKey; len(key) > 0 {
+				_ = stream.nativeEnableDecrypt(choice.streamSession, key)
+			}
+		}
 		warming, cancel := context.WithTimeout(ctx, 6*time.Second)
 		plan.PrefetchedBytes = stream.nativePrefetch(warming, choice.streamSession, plan.URL, input.Quality)
 		cancel()
@@ -68,6 +79,11 @@ func (stream *nativeStreamServer) nativePrefetch(ctx context.Context, token, ent
 		asset, exists := session.assets[id]
 		session.mu.Unlock()
 		if !exists {
+			return false
+		}
+		if len(session.cencKey) > 0 && asset.kind == "media" && len(asset.data) == 0 {
+			// 会话带密钥时直接抓原始地址拿到的是密文，预取毫无意义还抢当前
+			// 播放的带宽；解密布局已由 nativeEnableDecrypt 后台预热，跳过。
 			return false
 		}
 		playlist := strings.Contains(asset.contentType, "mpegurl")

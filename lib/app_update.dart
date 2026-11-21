@@ -72,6 +72,7 @@ class AppUpdate {
 
   /// 发布页地址，仅用于「用浏览器打开」。
   final String url;
+
   /// 正式发布 APK 的签名证书 SHA-256（64 位十六进制）。
   final String signingCertSha256;
   final String notes;
@@ -149,7 +150,8 @@ class AppUpdate {
       versionCode: code,
       tag: effectiveTag,
       url: 'https://github.com/$updateGitHubRepo/releases/tag/$effectiveTag',
-      signingCertSha256: cert is String &&
+      signingCertSha256:
+          cert is String &&
               cert.trim().length == 64 &&
               RegExp(r'^[0-9a-fA-F]{64}').hasMatch(cert.trim())
           ? cert.trim().toLowerCase()

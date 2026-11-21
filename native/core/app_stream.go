@@ -197,7 +197,35 @@ func (stream *nativeStreamServer) nativeEnableDecrypt(token string, key []byte) 
 		return errors.New("播放已结束")
 	}
 	session.cencKey = key
+	if len(key) > 0 {
+		stream.nativeWarmCENC(session)
+	}
 	return nil
+}
+
+// 拿到密钥就立刻在后台解析 CENC 布局（moov 盒子）。解析要按 1MB 一段从片源
+// 拉取，原来要等播放器的第一个字节请求才开始做，串在首帧前面白白多等几秒；
+// 提前到 enableDecrypt 时并行做，播放器请求到达时通常已经备好。
+func (stream *nativeStreamServer) nativeWarmCENC(session *nativeStreamSession) {
+	session.mu.Lock()
+	var address string
+	for _, asset := range session.assets {
+		if asset.kind == "media" && len(asset.data) == 0 && asset.contentType == "video/mp4" {
+			address = asset.address
+			break
+		}
+	}
+	session.mu.Unlock()
+	if address == "" {
+		return
+	}
+	ctx := session.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go func() {
+		_, _ = stream.cencLayout(ctx, session, address)
+	}()
 }
 
 func (stream *nativeStreamServer) nativeAsset(token string, session *nativeStreamSession, asset nativeStreamAsset) string {

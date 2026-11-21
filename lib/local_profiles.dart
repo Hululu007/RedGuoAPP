@@ -12,7 +12,6 @@ class LocalProfile {
     required this.name,
     this.admin = false,
     this.sources = const [],
-    this.download = true,
     this.salt = '',
     this.pinHash = '',
   });
@@ -20,7 +19,6 @@ class LocalProfile {
   final String name;
   final bool admin;
   final List<String> sources;
-  final bool download;
   final String salt;
   final String pinHash;
   bool get protected => salt.isNotEmpty && pinHash.isNotEmpty;
@@ -31,7 +29,6 @@ class LocalProfile {
     'name': name,
     'admin': admin,
     'sources': sources,
-    'download': download,
     'salt': salt,
     'pinHash': pinHash,
   };
@@ -45,7 +42,6 @@ class LocalProfile {
     final hash = value['pinHash'] as String? ?? '';
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(id) ||
         value['admin'] is! bool ||
-        (value.containsKey('download') && value['download'] is! bool) ||
         name.isEmpty ||
         name.length > 40 ||
         admin != (id == 'default') ||
@@ -61,7 +57,6 @@ class LocalProfile {
       name: name,
       admin: admin,
       sources: sources,
-      download: value['download'] != false,
       salt: salt,
       pinHash: hash,
     );

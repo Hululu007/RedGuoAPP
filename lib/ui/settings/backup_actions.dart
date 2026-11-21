@@ -55,7 +55,7 @@ Future<String?> restoreBackupFile(
     title: '恢复备份？',
     message: [
       '包含 ${(data['profiles'] as List).length} 个用户${modules > 0 ? '、$modules 个模块' : ''}。',
-      '将替换本机的用户、追剧、观看记录、偏好设置和站源开关；已下载视频保留。',
+      '将替换本机的用户、追剧、观看记录、偏好设置和站源开关。',
       '恢复后使用备份内的管理员密码登录${modules > 0 ? '，并可选择安装本机缺少的模块' : ''}。',
     ].join(),
     action: '恢复',
@@ -77,7 +77,7 @@ Future<String?> recoverBackupFile(
   final accepted = await _confirm(
     context,
     title: '从备份恢复用户与记录？',
-    message: '将使用这份备份替换损坏的用户配置、追剧、观看记录和偏好设置；已下载视频保留。建议先导出原始配置。',
+    message: '将使用这份备份替换损坏的用户配置、追剧、观看记录和偏好设置。建议先导出原始配置。',
     action: '继续恢复',
   );
   if (accepted != true || !context.mounted) return null;

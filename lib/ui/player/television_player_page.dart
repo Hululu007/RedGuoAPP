@@ -438,7 +438,6 @@ class _TelevisionPlayerPageState extends State<TelevisionPlayerPage>
                   children: [
                     PlayerVideo(
                       key: ValueKey(_session.player),
-                      handle: widget.handle,
                       player: _session.player,
                       fit: _session.videoFit,
                     ),
@@ -450,13 +449,16 @@ class _TelevisionPlayerPageState extends State<TelevisionPlayerPage>
                     ),
                     FadePresence(
                       duration: Motion.medium,
-                      child: _session.loading
+                      child: _session.booting
                           ? PlaybackLoading(session: _session)
                           : null,
                     ),
                     FadePresence(
                       duration: Motion.medium,
-                      child: _session.ready && _session.stalled
+                      child:
+                          _session.ready &&
+                              _session.stalled &&
+                              _session.started
                           ? const Center(child: CircularProgressIndicator())
                           : null,
                     ),

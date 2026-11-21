@@ -3,63 +3,25 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:window_manager/window_manager.dart';
 
 import 'app_device.dart';
-import 'boss_key.dart';
 import 'core_bridge.dart';
 import 'diary_service.dart';
 import 'local_files.dart';
 import 'local_store.dart';
-import 'picture_in_picture.dart';
-import 'portable_data.dart';
 import 'ui/app.dart';
 import 'ui/theme/app_theme.dart';
-import 'window_frame.dart';
-import 'window_on_top.dart';
-import 'windows_data_migration.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (Platform.isAndroid) {
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
-  }
-  if (Platform.isWindows) {
-    enablePortableData();
-    if (portableDataPath == null) await migrateWindowsData();
-    await windowManager.ensureInitialized();
-    await rememberWindowFrame();
-  }
-  if (Platform.isMacOS) {
-    await windowManager.ensureInitialized();
-    try {
-      await windowManager.waitUntilReadyToShow(
-        const WindowOptions(
-          size: Size(1280, 800),
-          minimumSize: desktopMinimumSize,
-          center: true,
-        ),
-        () async {
-          await rememberWindowFrame();
-          await windowManager.show();
-        },
-      );
-    } catch (_) {}
-  }
-  if (Platform.isWindows || Platform.isMacOS) {
-    await restoreWindowOnTop();
-    await restoreBossKey();
-  }
-  MediaKit.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
   final device = await AppDevice.detect();
-  final rendering = Platform.isAndroid
-      ? ', 渲染: ${await AppDevice.compatibleRendering() ? 'skia' : 'impeller'}'
-      : '';
+  final rendering =
+      ', 渲染: ${await AppDevice.compatibleRendering() ? 'skia' : 'impeller'}';
   DiaryService.add(
     '[App] 应用启动，版本: ${device.version}, '
     '平台: ${Platform.operatingSystem}$rendering',
@@ -98,17 +60,8 @@ class _AppBootstrapState extends State<AppBootstrap>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     DiaryService.add('[App] 生命周期：${state.name}');
-    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+    if (state == AppLifecycleState.resumed) {
       unawaited(_refreshDevice());
-    }
-    if (!Platform.isIOS) return;
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      unawaited(
-        NativeRepository(
-          background: true,
-        ).controlDownloads('pauseAll').catchError((Object _) {}),
-      );
     }
   }
 
@@ -133,6 +86,13 @@ class _AppBootstrapState extends State<AppBootstrap>
         preferences,
         LocalFiles(Directory(path.join(support.path, 'store'))),
       );
+      // 手机端一次性把播放手势/样式偏好翻新成新版默认（竖屏样式开、上下滑
+      // 切集开、亮度/音量滑动关）。电视设备与手动切到电视界面的不动。
+      if (!device.television && local.displayMode != 'television') {
+        try {
+          await local.upgradePhonePlaybackDefaults();
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         store = local;

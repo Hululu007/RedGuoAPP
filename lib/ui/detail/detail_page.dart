@@ -1,18 +1,17 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import '../../diary_service.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../drama_details.dart';
 import '../../local_store.dart';
 import '../../models.dart';
-import '../../playback_preferences.dart';
 import '../app_scope.dart';
-import '../downloads/download_picker_page.dart';
 import '../player/playback_handle.dart';
 import '../player/playback_page.dart';
-import '../shell/app_shell.dart';
 import '../widgets/cover_backdrop.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/focus_ring.dart';
@@ -175,7 +174,6 @@ class DetailPage extends StatefulWidget {
 class _DetailPageState extends State<DetailPage> {
   DramaDetails? _details;
   PlaybackHandle? _handle;
-  bool _watching = false;
   var _currentEpisode = GlobalKey();
   String _keyedDrama = '';
   bool _expanded = false;
@@ -204,10 +202,6 @@ class _DetailPageState extends State<DetailPage> {
     _details?.dispose();
     super.dispose();
   }
-
-  bool get _canDownload =>
-      AppScope.of(context).repository.supportsDownloads &&
-      widget.store.canDownload;
 
   bool get _ready => !_details!.loading && _details!.episodes.isNotEmpty;
 
@@ -250,16 +244,12 @@ class _DetailPageState extends State<DetailPage> {
     index: index,
     position: position,
     autoplay: autoplay,
-    preopen: widget.store.playbackPreferences.preopens(
-      television: AppScope.of(context).television,
-    ),
   );
 
   void _detailsChanged() {
     final seasons = _details!.seasons;
     _handle?.session.syncSeasons(seasons);
     _watched?.session.syncSeasons(seasons);
-    _preopen();
     unawaited(_autoplay());
   }
 
@@ -268,10 +258,17 @@ class _DetailPageState extends State<DetailPage> {
     if (!_autoplayPending || !mounted || details.loading) return;
     _autoplayPending = false;
     if (_ready && details.allowed) {
+      final stopwatch = Stopwatch()..start();
       if (_direct) await _awaitVideoSize();
+      DiaryService.add(
+        '[Detail] 等待画面就绪 ${stopwatch.elapsedMilliseconds}ms',
+      );
       if (!mounted) return;
       final watched = await _play(details.resumeIndex, resume: true);
       if (!mounted) return;
+      DiaryService.add(
+        '[Detail] 点海报到起播共 ${stopwatch.elapsedMilliseconds}ms',
+      );
       if (_direct && watched) {
         Navigator.pop(context);
         return;
@@ -318,34 +315,6 @@ class _DetailPageState extends State<DetailPage> {
     lift(entering.status);
   }
 
-  void _preopen() {
-    final details = _details!;
-    if (_handle != null ||
-        _watching ||
-        !mounted ||
-        !_ready ||
-        !details.allowed) {
-      return;
-    }
-    // 只给 MPV 预开播放器。MPV 初始化 libmpv 要几百毫秒，提前建好点播放时能省下这段；
-    // ExoPlayer 初始化只要十几毫秒（日志实测 17ms），预开省不了多少，却要一直占着
-    // 一个播放器实例和一份解码器资源，反而拖慢详情页本身。
-    final preferences = widget.store.playbackPreferences;
-    final kernel = preferences.playbackKernel == PlaybackKernel.exo &&
-            widget.store.exoDecoderBroken
-        ? PlaybackKernel.mpv
-        : preferences.playbackKernel;
-    if (kernel != PlaybackKernel.mpv) {
-      return;
-    }
-    final index = details.resumeIndex;
-    _handle = _open(
-      index,
-      position: _startAt(index, resume: true),
-      autoplay: false,
-    );
-  }
-
   Future<bool> _play(int index, {bool resume = false}) async {
     final details = _details!;
     final episode = details.episodes[index];
@@ -377,15 +346,31 @@ class _DetailPageState extends State<DetailPage> {
     _handle = null;
     handle.session.syncSeasons(details.seasons);
     handle.session.start(index, position: position);
-    _watching = true;
     _watched = handle;
     final route = MaterialPageRoute<void>(
       builder: (_) => PlaybackPage(store: widget.store, handle: handle),
     );
-    final closed = Navigator.of(context, rootNavigator: true).push(route);
-    if (_curtain && !_direct) _liftCurtainAfter(route.animation!);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final closed = navigator.push(route);
+    if (_curtain && !_direct) {
+      _liftCurtainAfter(route.animation!);
+    } else if (_direct && _curtain) {
+      // 手机直达播放：详情页只是一层转场幕布，永远不该被看见，也不该挂在
+      // 播放器底下。等播放器完全盖上屏幕后把它从栈里摘掉——播放中它不再
+      // 像是「盖在播放器下面」，关闭播放器也直接回到剧库，不会闪一下幕布。
+      final detailRoute = ModalRoute.of(context);
+      void detach(AnimationStatus status) {
+        if (status != AnimationStatus.completed) return;
+        route.animation!.removeStatusListener(detach);
+        if (detailRoute != null && detailRoute.isActive) {
+          navigator.removeRoute(detailRoute);
+        }
+      }
+
+      route.animation!.addStatusListener(detach);
+      detach(route.animation!.status);
+    }
     await closed;
-    _watching = false;
     _watched = null;
     if (!mounted || _curtain) return true;
     final played = handle.session.detail.drama.id;
@@ -407,11 +392,6 @@ class _DetailPageState extends State<DetailPage> {
       if (mounted) _televisionDetail.currentState?.focusEpisode(index);
     });
   }
-
-  void _download() => openPage<void>(
-    context,
-    (_) => DownloadPickerPage(store: widget.store, detail: _detail),
-  );
 
   void _locate(int index) {
     _details!.selectGroup(index ~/ episodeGroupSize);
@@ -619,21 +599,7 @@ class _DetailPageState extends State<DetailPage> {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
             child: Row(
               spacing: 12,
-              children: [
-                if (_canDownload)
-                  FocusRing(
-                    radius: m.button / 2,
-                    child: IconButton.filledTonal(
-                      tooltip: '下载选集',
-                      onPressed: _ready ? _download : null,
-                      style: IconButton.styleFrom(
-                        minimumSize: Size.square(m.button),
-                      ),
-                      icon: const Icon(Icons.download_rounded),
-                    ),
-                  ),
-                Expanded(child: _playButton(details, m)),
-              ],
+              children: [Expanded(child: _playButton(details, m))],
             ),
           ),
         ),
@@ -678,10 +644,7 @@ class _DetailPageState extends State<DetailPage> {
           padding: EdgeInsets.only(top: desktop ? 22 : 20),
           child: Row(
             spacing: 12,
-            children: [
-              Expanded(child: _playButton(details, m)),
-              if (_canDownload) _downloadButton(m),
-            ],
+            children: [Expanded(child: _playButton(details, m))],
           ),
         ),
         if (drama.description.isNotEmpty)
@@ -1093,23 +1056,6 @@ class _DetailPageState extends State<DetailPage> {
       ),
     );
   }
-
-  Widget _downloadButton(_Metrics m) => FocusRing(
-    radius: m.button / 2,
-    child: FilledButton.tonalIcon(
-      onPressed: _ready ? _download : null,
-      style: FilledButton.styleFrom(
-        minimumSize: Size(0, m.button),
-        iconSize: m.buttonIcon - 2,
-        textStyle: TextStyle(
-          fontSize: m.buttonText - 1,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      icon: const Icon(Icons.download_rounded),
-      label: const Text('下载选集'),
-    ),
-  );
 
   Widget _episodeStatus(DramaDetails details, {bool autofocus = false}) =>
       FadeSwitcher(

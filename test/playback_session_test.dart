@@ -7,7 +7,6 @@ import 'package:duanju_app/models.dart';
 import 'package:duanju_app/playback_engine.dart';
 import 'package:duanju_app/playback_session.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:media_kit/media_kit.dart';
 
 import 'support/fake_player.dart';
 import 'support/fakes.dart';
@@ -132,7 +131,7 @@ void main() {
     expect(session.ready, isTrue);
     expect(session.episode.number, 2);
     expect(repository.resolved.single, (episode: 2, quality: 0));
-    expect(player.opened.single.uri, 'https://media.test/1.m3u8');
+    expect(player.opened.single.url, 'https://media.test/1.m3u8');
     expect(player.opened.single.start, _seconds(30));
     expect(player.rates, [1.0]);
     expect(session.qualityLabel, '自动（1080P）');
@@ -363,15 +362,15 @@ void main() {
 
     expect(repository.preloaded, [2]);
     expect(session.standbyIndex, 1);
-    expect(identical(session.standby?.mpvPlayer, standby), isTrue);
-    expect(standby.opened.single.uri, 'https://media.test/2.m3u8');
+    expect(identical(session.standby?.backend, standby), isTrue);
+    expect(standby.opened.single.url, 'https://media.test/2.m3u8');
     expect(standby.state.playing, isFalse);
 
     player.finish();
     await pumpEventQueue();
 
     expect(session.index, 1);
-    expect(identical(session.player.mpvPlayer, standby), isTrue);
+    expect(identical(session.player.backend, standby), isTrue);
     expect(standby.state.playing, isTrue);
     expect(standby.opened, hasLength(1));
     expect(repository.resolved, hasLength(1));
@@ -389,7 +388,7 @@ void main() {
 
     await session.play(2);
 
-    expect(identical(session.player.mpvPlayer, player), isTrue);
+    expect(identical(session.player.backend, player), isTrue);
     expect(session.standbyIndex, -1);
     expect(standby.stops, greaterThan(0));
     expect(repository.released, contains('session-2'));
@@ -496,7 +495,7 @@ void main() {
 
     final switching = session.play(1);
 
-    expect(identical(session.player.mpvPlayer, standby), isTrue);
+    expect(identical(session.player.backend, standby), isTrue);
     expect(session.ready, isTrue);
     expect(session.paused, isFalse);
     await switching;
@@ -504,15 +503,7 @@ void main() {
     expect(store.watched(_show.id)!.episode, 1);
   });
 
-  test('Exo 更早准备下一集，MPV 保持原阈值', () {
-    expect(preloadLeadFor(exo: false, durationMs: 100000), 45000);
-    expect(preloadLeadFor(exo: true, durationMs: 100000), 50000);
-    expect(preloadLeadFor(exo: true, durationMs: 60000), 45000);
-    expect(preloadLeadFor(exo: true, durationMs: 600000), 90000);
-    expect(preloadLeadFor(exo: true, durationMs: 0), 45000);
-  });
-
-  test('切集时等仍在打开的下一集，不再重新取地址', () async {
+  test('备用还在预热中就切集：释放备用，主播放器复用地址接手', () async {
     final repository = _PlaybackRepository();
     final store = await openStore();
     final standby = FakePlayer();
@@ -521,18 +512,25 @@ void main() {
     final (session, player) = await _open(repository, store, standby: standby);
     await _settle(player);
 
+    // 预热已启动但备用还没打开完（gate 未放行）。
     expect(session.standbyIndex, -1);
     expect(standby.opened, hasLength(1));
 
     final switching = session.play(1);
     await pumpEventQueue();
-    expect(identical(session.player.mpvPlayer, player), isTrue);
+    // 不等备用：主播放器立刻接手，备用被停用。
+    expect(identical(session.player.backend, player), isTrue);
+    expect(standby.stops, greaterThan(0));
+    expect(standby.state.playing, isFalse);
 
     gate.complete();
     await switching;
 
-    expect(identical(session.player.mpvPlayer, standby), isTrue);
-    expect(standby.state.playing, isTrue);
+    // 备用始终没有接管播放；地址复用预热结果，没有重新取地址。
+    expect(identical(session.player.backend, player), isTrue);
+    expect(player.opened.last.url, 'https://media.test/2.m3u8');
+    expect(session.index, 1);
+    expect(standby.state.playing, isFalse);
     expect(repository.resolved, hasLength(1));
     expect(repository.preloaded, [2]);
   });
@@ -589,8 +587,13 @@ class _SlowPlayer extends FakePlayer {
   final gate = Completer<void>();
 
   @override
-  Future<void> open(Playable playable, {bool play = true}) async {
+  Future<void> open(
+    String url, {
+    required Map<String, String> headers,
+    required Duration? start,
+    required bool play,
+  }) async {
     await gate.future;
-    await super.open(playable, play: play);
+    await super.open(url, headers: headers, start: start, play: play);
   }
 }

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -153,9 +151,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ].join(' · '),
       SettingsGroup.playback => '倍速、清晰度、解码与手势',
       SettingsGroup.danmaku => '字号、颜色、显示区域与屏蔽词',
-      SettingsGroup.download =>
-        Platform.isAndroid ? '默认画质、同时下载数量、自动导出' : '默认画质、VIP 集、同时下载数量',
-      SettingsGroup.storage => '下载目录、清理缓存、删除全部数据',
+      SettingsGroup.storage => '清理缓存、删除全部数据',
       SettingsGroup.proxy => '连接方式、代理地址',
       SettingsGroup.users => '当前：${store.profile.name}',
       SettingsGroup.about =>

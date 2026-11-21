@@ -156,10 +156,8 @@ void main() {
           'sourceGateHash': '',
         }),
         'themeColor': 'unknown',
-        'miniWindow': '1,2',
       });
       expect(store.configurationError, isNull);
-      expect(store.miniWindow, isNull);
       expect(store.playbackPreferences.autoPictureInPicture, isFalse);
       expect(store.displayMode, 'auto');
       expect(store.themeMode, 'system');
@@ -205,7 +203,6 @@ void main() {
         final store = await _open(records);
         expect(store.configurationError, isNotNull);
         expect(store.locked, isTrue);
-        expect(store.canDownload, isFalse);
         expect(store.favorites, isEmpty);
         expect(store.sources, isEmpty);
         await expectLater(store.switchProfile('default'), throwsStateError);
@@ -219,51 +216,68 @@ void main() {
       });
     }
 
-    test('沿用旧默认内核的记录升级后改用 ExoPlayer，且只迁移一次', () async {
+    test('旧版本存下的 mpv / exo 内核取值升级后归一到原生内核', () async {
       final files = temporaryFiles();
-      final store = await openStore(const {}, null, files);
-      await store.setPlaybackPreferences(
-        store.playbackPreferences.copyWith(playbackKernel: PlaybackKernel.mpv),
-      );
-      final saved = Map<String, Object?>.from(
-        await files.read('users/default/settings.json') as Map,
-      )..remove('kernelDefault');
-      await files.write('users/default/settings.json', saved);
+      await openStore(const {}, null, files);
+      // mpv / exo 内核已整体移除，这里直接写回旧版本会留下的取值来验证归一。
+      const path = 'users/default/settings.json';
+      final saved = Map<String, Object?>.from(await files.read(path) as Map);
+      final playback = Map<String, Object?>.from(
+        saved['playback'] as Map? ?? const {},
+      )..['playbackKernel'] = 'mpv';
+      saved['playback'] = playback;
+      await files.write(path, saved);
 
       final migrated = await openStore(const {}, null, files);
-      expect(migrated.playbackPreferences.playbackKernel, PlaybackKernel.exo);
-      await migrated.setPlaybackPreferences(
-        migrated.playbackPreferences.copyWith(
-          playbackKernel: PlaybackKernel.mpv,
-        ),
+      expect(
+        migrated.playbackPreferences.playbackKernel,
+        PlaybackKernel.native,
       );
-
-      final reopened = await openStore(const {}, null, files);
-      expect(reopened.playbackPreferences.playbackKernel, PlaybackKernel.mpv);
     });
 
-    test('解码失败标记会留存，主动选回 ExoPlayer 后清零', () async {
+    test('手机端默认值迁移在首次安装时能完成（写队列不死锁）', () async {
+      final store = await _open();
+      await store.upgradePhonePlaybackDefaults().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => fail('默认值迁移卡死：写队列出现嵌套等待'),
+      );
+      final preferences = store.playbackPreferences;
+      expect(preferences.portraitStyleForWide, isTrue);
+      expect(preferences.swipeLevels, isFalse);
+      expect(preferences.swipeEpisodes, isTrue);
+      // 标记已落盘，之后启动不再重复迁移
+      final saved = await store.files.read('users/default/settings.json');
+      expect((saved as Map)['phonePlaybackDefaults'], isTrue);
+    });
+
+    test('老用户已保存的旧默认值被一次性翻新，且不覆盖之后的手动修改', () async {
       final files = temporaryFiles();
-      final store = await openStore(const {}, null, files);
-      expect(store.exoDecoderBroken, isFalse);
+      await openStore(const {}, null, files);
+      const path = 'users/default/settings.json';
+      final saved = Map<String, Object?>.from(await files.read(path) as Map);
+      // 模拟旧版本把旧默认值整体存进了偏好文件
+      saved['playback'] = const PlaybackPreferences(
+        portraitStyleForWide: false,
+        swipeLevels: true,
+        swipeEpisodes: false,
+      ).toJson();
+      await files.write(path, saved);
 
-      await store.setExoDecoderBroken(true);
-      expect(store.exoDecoderBroken, isTrue);
-      final reopened = await openStore(const {}, null, files);
-      expect(reopened.exoDecoderBroken, isTrue);
+      final migrated = await openStore(const {}, null, files);
+      await migrated.upgradePhonePlaybackDefaults().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => fail('默认值迁移卡死：写队列出现嵌套等待'),
+      );
+      expect(migrated.playbackPreferences.portraitStyleForWide, isTrue);
+      expect(migrated.playbackPreferences.swipeLevels, isFalse);
+      expect(migrated.playbackPreferences.swipeEpisodes, isTrue);
 
-      await reopened.setPlaybackPreferences(
-        reopened.playbackPreferences.copyWith(
-          playbackKernel: PlaybackKernel.mpv,
-        ),
+      // 迁移完成后的手动修改，再次触发迁移不会被覆盖
+      await migrated.setPlaybackPreferences(
+        migrated.playbackPreferences.copyWith(swipeLevels: true),
       );
-      expect(reopened.exoDecoderBroken, isTrue);
-      await reopened.setPlaybackPreferences(
-        reopened.playbackPreferences.copyWith(
-          playbackKernel: PlaybackKernel.exo,
-        ),
-      );
-      expect(reopened.exoDecoderBroken, isFalse);
+      await migrated.upgradePhonePlaybackDefaults();
+      expect(migrated.playbackPreferences.swipeLevels, isTrue);
     });
   });
 

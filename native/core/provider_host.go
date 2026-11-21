@@ -308,7 +308,17 @@ func (d *Downloader) Reserve(ctx context.Context, address, lane string) (uint64,
 	}
 	d.reservations[ticket] = release
 	d.reserveMu.Unlock()
+	// 名额必须跟随调用方的生命周期：预加载/取地址被取消（快速切集、退出
+	// 播放）时，如果 JS 还没来得及用这张票发请求，名额不能干等 60 秒超时
+	// 才回收——全局限流一共就几个名额，孤儿名额会把后续所有取地址饿死，
+	// 表现就是「连续切集后一直转圈，重试也转圈」。
+	stopWatch := context.AfterFunc(ctx, func() {
+		if release, reserved := d.takeReservation(ticket); reserved {
+			release()
+		}
+	})
 	time.AfterFunc(reservationLifetime, func() {
+		stopWatch()
 		if release, reserved := d.takeReservation(ticket); reserved {
 			release()
 		}

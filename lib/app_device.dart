@@ -15,6 +15,7 @@ class AppDevice {
   static var _phoneMode = false;
   static var _orientation = PlayerOrientation.auto;
   static PlayerOrientation? _heldOrientation;
+
   /// 设备形态判断结果（是否电视）。设备形态开机后不会变，判一次就够。
   static bool? _televisionDevice;
 
@@ -51,21 +52,10 @@ class AppDevice {
             ? version
             : fallback.version,
       );
-    } on PlatformException {
-      return fallback;
-    } on MissingPluginException {
-      return fallback;
-    } on TimeoutException {
+    } catch (_) {
+      // 插件缺失、通道未就绪（纯 Dart 测试）或超时，都按非电视设备处理。
       return fallback;
     }
-  }
-
-  /// 让 ExoPlayer 按「解码方式」选解码器：software 时只用系统软解。
-  static Future<void> setDecoderMode(String mode) async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
-    try {
-      await channel.invokeMethod<void>('setDecoderMode', {'mode': mode});
-    } catch (_) {}
   }
 
   /// 取走原生的解码器诊断信息：设备可用解码器、实际选中的解码器、初始化失败原因。
@@ -76,7 +66,8 @@ class AppDevice {
     if (defaultTargetPlatform != TargetPlatform.android) return const [];
     try {
       final lines =
-          await channel.invokeListMethod<String>('takeDecoderDiagnostics') ?? const [];
+          await channel.invokeListMethod<String>('takeDecoderDiagnostics') ??
+          const [];
       return lines.where((line) => line.trim().isNotEmpty).toList();
     } catch (_) {
       return const [];

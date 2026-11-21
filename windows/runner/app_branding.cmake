@@ -1,7 +1,0 @@
-set(APP_DISPLAY_NAME "红果剧场")
-set(APP_EXECUTABLE_NAME "guoapp.exe")
-set(APP_PACKAGE_NAME "$ENV{PACKAGE_NAME}")
-string(STRIP "${APP_PACKAGE_NAME}" APP_PACKAGE_NAME)
-if(APP_PACKAGE_NAME STREQUAL "")
-  set(APP_PACKAGE_NAME "com.x.redguoapp")
-endif()

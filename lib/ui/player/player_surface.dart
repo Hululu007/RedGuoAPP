@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import '../../playback_preferences.dart';
 import '../../playback_engine.dart';
 import '../../playback_session.dart';
-import '../app_scope.dart';
 import '../settings/sorani_account_view.dart';
 import '../theme/motion.dart';
 import '../widgets/contained_slider.dart';
@@ -156,7 +155,7 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
       !_session.locked &&
       (_visible || _session.paused || _session.stalled || !_session.ready);
 
-  bool get _lockable => widget.touch && widget.fullscreen && !desktopPlatform;
+  bool get _lockable => widget.touch && widget.fullscreen;
 
   void _lock() {
     _pressEnd();
@@ -353,7 +352,6 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
           children: [
             PlayerVideo(
               key: ValueKey(_session.player),
-              handle: widget.handle,
               player: _session.player,
               fit: _session.videoFit,
             ),
@@ -396,7 +394,7 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
               ),
             FadePresence(
               duration: Motion.medium,
-              child: _session.ready && _session.stalled
+              child: _session.ready && _session.stalled && _session.started
                   ? const IgnorePointer(
                       child: Center(child: CircularProgressIndicator()),
                     )
@@ -464,7 +462,7 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
             if (_session.saveWarning case final warning?) _saveWarning(warning),
             FadePresence(
               duration: Motion.medium,
-              child: _session.loading
+              child: _session.booting
                   ? PlaybackLoading(session: _session)
                   : null,
             ),
@@ -1197,19 +1195,7 @@ class PlaybackLoading extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Colors.black.withValues(alpha: .78),
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(
-            session.loadingMessage,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
-        ],
-      ),
-    ),
+    child: const Center(child: CircularProgressIndicator()),
   );
 }
 

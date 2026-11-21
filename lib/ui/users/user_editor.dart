@@ -27,7 +27,6 @@ class _UserEditorState extends State<UserEditor> {
     if (widget.profile == null)
       for (final site in SourceSite.values) site.id,
   };
-  late var _download = widget.profile?.download ?? true;
   var _clearPin = false;
   var _busy = false;
   String? _error;
@@ -70,7 +69,6 @@ class _UserEditorState extends State<UserEditor> {
       id: _profile?.id,
       name: _name.text,
       sources: _sources.toList(),
-      download: _download,
       pin: _clearPin
           ? ''
           : _pin.text.isEmpty
@@ -85,7 +83,7 @@ class _UserEditorState extends State<UserEditor> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('删除 ${profile.name}？'),
-        content: const Text('会同时删除该用户的追剧和观看记录，下载文件保留。'),
+        content: const Text('会同时删除该用户的追剧和观看记录。'),
         actions: [
           FocusRing(
             radius: 20,
@@ -264,17 +262,6 @@ class _UserEditorState extends State<UserEditor> {
                     );
                   },
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          GroupCard(
-            children: [
-              SwitchTile(
-                title: '允许下载',
-                subtitle: '可下载和管理本机视频；关闭后仅在线观看，下载入口置灰',
-                value: _download,
-                onChanged: (value) => setState(() => _download = value),
               ),
             ],
           ),

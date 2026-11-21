@@ -47,7 +47,8 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugins.videoplayer.DecoderPreference
+import com.guoapp.player.DecoderPreference
+import com.guoapp.player.NativePlayerChannel
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -81,6 +82,7 @@ class MainActivity : FlutterActivity() {
     private var headroomReadAt = 0L
     private var thermalHeadroom: Double? = null
     private var deviceChannel: MethodChannel? = null
+    private var coverChannel: CoverChannel? = null
     private var televisionMode = false
     private var orientationListener: OrientationEventListener? = null
     private var orientationMode = "auto"
@@ -289,6 +291,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         pictureInPictureReceiver?.let { unregisterReceiver(it) }
         pictureInPictureReceiver = null
+        NativePlayerChannel.release()
         super.onDestroy()
     }
 
@@ -336,6 +339,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // 原生播放内核：双 ExoPlayer 常驻 + 两张终生绑定的 SurfaceView（见 player 包）。
+        NativePlayerChannel.attach(this, flutterEngine)
+        // HEIC 封面转码：系统 ImageDecoder（API 28+）转 JPEG，替代已移除的 ffmpeg。
+        coverChannel = CoverChannel(flutterEngine.dartExecutor.binaryMessenger).also { it.attach() }
         textInput = TextInputBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         mediaControls = MediaControls(this, flutterEngine.dartExecutor.binaryMessenger)
         deviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/device")
@@ -356,9 +363,10 @@ class MainActivity : FlutterActivity() {
                                 .onFailure { result.error("signing_certificate_unavailable", "无法读取应用签名证书", null) }
                         }
                         "setDecoderMode" -> {
-                            // 「解码方式」选软件解码时，ExoPlayer 只用系统软解。
-                            DecoderPreference.softwareOnly =
-                                call.argument<String>("mode") == "software"
+                            // 「解码方式」：软件只用软解，硬件只允许硬解（失败不回落软解）。
+                            val mode = call.argument<String>("mode")
+                            DecoderPreference.softwareOnly = mode == "software"
+                            DecoderPreference.hardwareOnly = mode == "hardware"
                             result.success(null)
                         }
                         "takeDecoderDiagnostics" -> {
@@ -835,6 +843,8 @@ class MainActivity : FlutterActivity() {
         mediaControls = null
         deviceChannel?.setMethodCallHandler(null)
         deviceChannel = null
+        coverChannel?.detach()
+        coverChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

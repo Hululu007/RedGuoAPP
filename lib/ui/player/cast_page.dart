@@ -10,7 +10,7 @@ import '../../playback_session.dart';
 import 'playback_sheets.dart';
 import 'player_surface.dart' show formatClock;
 
-bool get castSupported => !Platform.isIOS;
+bool get castSupported => true;
 
 Future<void> startCast(BuildContext context, PlaybackSession session) async {
   session.pause();

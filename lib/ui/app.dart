@@ -229,7 +229,7 @@ class _DuanjuAppState extends State<DuanjuApp> with WidgetsBindingObserver {
       'television' => FormFactor.television,
       'phone' => FormFactor.phone,
       'pad' => FormFactor.pad,
-      'window' => desktopPlatform ? FormFactor.window : FormFactor.pad,
+      'window' => FormFactor.pad,
       _ => widget.television ? FormFactor.television : null,
     };
     final television = formFactor == FormFactor.television;
@@ -295,6 +295,7 @@ class _DuanjuAppState extends State<DuanjuApp> with WidgetsBindingObserver {
             child: AppScope(
               repository: widget.repository,
               formFactor: formFactor,
+              isTelevisionDevice: widget.television,
               systemColorAvailable: _systemColor != null,
               version: widget.version,
               child: CoverBlurScope(

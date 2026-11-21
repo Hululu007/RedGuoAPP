@@ -8,7 +8,13 @@ import '../users/password_dialog.dart';
 import '../widgets/focus_ring.dart';
 import '../widgets/group_card.dart';
 import 'settings_rows.dart';
-import 'storage_view.dart';
+
+String storageSize(int bytes) {
+  if (bytes < 0) return '暂不可用';
+  if (bytes < 1 << 20) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  if (bytes < 1 << 30) return '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
+  return '${(bytes / (1 << 30)).toStringAsFixed(2)} GB';
+}
 
 class DataCard extends StatefulWidget {
   const DataCard({super.key, required this.store, required this.onCleared});
@@ -57,9 +63,7 @@ class _DataCardState extends State<DataCard> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除全部数据？'),
-        content: const Text(
-          '将删除所有用户、追剧、观看记录、设置、已安装模块、缓存和已下载的视频，无法恢复。已导出到相册的视频保留。完成后应用会退出。',
-        ),
+        content: const Text('将删除所有用户、追剧、观看记录、设置、已安装模块和缓存，无法恢复。完成后应用会退出。'),
         actions: [
           FocusRing(
             radius: 20,
@@ -125,7 +129,7 @@ class _DataCardState extends State<DataCard> {
       return;
     }
     navigator.pop();
-    if (leftover.isEmpty && !Platform.isIOS) exit(0);
+    if (leftover.isEmpty) exit(0);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -138,16 +142,14 @@ class _DataCardState extends State<DataCard> {
             [
               if (leftover.isNotEmpty)
                 '以下文件没能删除，请退出后手动删除：\n${leftover.join('\n')}',
-              if (Platform.isIOS) '请从后台划掉应用后重新打开。',
             ].join('\n\n'),
           ),
           actions: [
-            if (!Platform.isIOS)
-              FilledButton(
-                autofocus: true,
-                onPressed: () => exit(0),
-                child: const Text('退出应用'),
-              ),
+            FilledButton(
+              autofocus: true,
+              onPressed: () => exit(0),
+              child: const Text('退出应用'),
+            ),
           ],
         ),
       ),
@@ -171,7 +173,7 @@ class _DataCardState extends State<DataCard> {
         ),
         SettingsTile(
           title: '删除全部数据',
-          subtitle: admin ? '删除用户、记录、设置、模块、缓存和已下载的视频，完成后退出应用' : '需要管理员',
+          subtitle: admin ? '删除用户、记录、设置、模块和缓存，完成后退出应用' : '需要管理员',
           enabled: admin,
           onTap: _deleteAll,
         ),

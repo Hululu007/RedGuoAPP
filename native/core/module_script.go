@@ -16,7 +16,10 @@ import (
 
 const (
 	moduleInstanceLimit = 4
-	moduleCallTimeout   = 60 * time.Second
+	// 单次模块调用超时。必须明显小于分发层的 60 秒：取地址若卡在站源模块
+	// 里，25 秒就失败并把错误交还给播放层的恢复流程，而不是让用户盯着
+	// 转圈到 60 秒超时。
+	moduleCallTimeout   = 25 * time.Second
 	moduleQuickTimeout  = 5 * time.Second
 )
 
@@ -323,7 +326,7 @@ func (p *jsProvider) acquire(ctx context.Context) (*jsInstance, error) {
 	case instance := <-p.idle:
 		return instance, nil
 	case p.slots <- struct{}{}:
-		instance, err := p.newInstance()
+		instance, err := p.newInstance(ctx)
 		if err != nil {
 			<-p.slots
 		}
@@ -333,10 +336,13 @@ func (p *jsProvider) acquire(ctx context.Context) (*jsInstance, error) {
 	}
 }
 
-func (p *jsProvider) newInstance() (*jsInstance, error) {
+// newInstance 创建 JS 实例并执行模块顶层代码。传入调用方的 ctx：顶层代码若
+// 调 host.fetch/sleep 等阻塞工具，要跟着调用方超时走，绝不能用 Background
+// ——否则一次顶层阻塞会永久占住一个实例名额，后续取地址全部排队超时。
+func (p *jsProvider) newInstance(ctx context.Context) (*jsInstance, error) {
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
-	instance := &jsInstance{vm: vm, ctx: context.Background()}
+	instance := &jsInstance{vm: vm, ctx: ctx}
 	module, exports := vm.NewObject(), vm.NewObject()
 	if err := module.Set("exports", exports); err != nil {
 		return nil, err

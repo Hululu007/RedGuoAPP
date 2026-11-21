@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../download_converter.dart';
-import '../../merge_queue.dart';
-import '../../download_overview.dart';
 import '../../local_store.dart';
 import '../../models.dart';
 import '../app_scope.dart';
 import '../detail/detail_page.dart';
-import '../downloads/downloads_page.dart';
 import '../history/history_page.dart';
 import '../modules/modules_page.dart';
 import '../shell/app_shell.dart';
@@ -22,16 +18,10 @@ class MinePage extends StatelessWidget {
   const MinePage({
     super.key,
     required this.store,
-    required this.downloads,
-    required this.converter,
-    required this.merges,
     required this.entryFocus,
     required this.onExitUp,
   });
   final LocalStore store;
-  final DownloadOverview downloads;
-  final DownloadConverter converter;
-  final MergeQueue merges;
   final FocusNode entryFocus;
   final VoidCallback onExitUp;
 
@@ -53,16 +43,6 @@ class MinePage extends StatelessWidget {
   void _openHistory(BuildContext context) =>
       openPage<void>(context, (_) => HistoryPage(store: store));
 
-  void _openDownloads(BuildContext context) => openPage<void>(
-    context,
-    (_) => DownloadsPage(
-      store: store,
-      downloads: downloads,
-      converter: converter,
-      merges: merges,
-    ),
-  );
-
   Widget _userCard(BuildContext context) =>
       _UserCard(store: store, onTap: () => openUsers(context, store));
 
@@ -76,12 +56,6 @@ class MinePage extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     spacing: 12,
     children: [
-      if (store.canDownload)
-        _Entry(
-          icon: Icons.download_rounded,
-          title: '下载',
-          onTap: () => _openDownloads(context),
-        ),
       if (store.profile.admin)
         _Entry(
           icon: Icons.extension_outlined,
