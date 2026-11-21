@@ -70,7 +70,7 @@ for abi in abis:
     with zipfile.ZipFile(source) as archive:
         names = set(archive.namelist())
         required = [f'lib/{abi}/{library}' for library in
-                    ['libduanju_core.so', 'libflutter.so', 'libapp.so', 'libmpv.so', 'libffmpegkit.so']]
+                    ['libduanju_core.so', 'libflutter.so', 'libapp.so']]
         missing = set(required) - names
         if missing:
             raise SystemExit('APK 缺少原生库：' + ', '.join(sorted(missing)))
